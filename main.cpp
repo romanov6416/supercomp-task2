@@ -57,6 +57,8 @@ public:
 		coor_t second = ( (c-u)/hj_1 - (d-c)/hj ) / hj;
 		return - (first + second);
 	}
+
+
 };
 
 
@@ -75,12 +77,12 @@ public:
 	const coor_t A;  // begin of segment
 	const coor_t B;  // end of segment
 	const coor_t q;  // eventually ratio
-	const int min_local_idx;
-	const int max_local_idx;
+	const int min_idx;
+	const int max_idx;
 
 	OneDimensionData(const int N, const coor_t A, const coor_t B, const coor_t q,
 	                 const int min_local_idx, const int max_local_idx) :
-			N(N), A(A), B(B), q(q), min_local_idx(min_local_idx), max_local_idx(max_local_idx)
+			N(N), A(A), B(B), q(q), min_idx(min_local_idx), max_idx(max_local_idx)
 	{}
 
 	inline coor_t f(const coor_t t) {
@@ -96,32 +98,36 @@ public:
 		return 0.5 * (coor(global_idx) + coor(global_idx + 1));
 	}
 
-	inline bool is_max(const coor_t coor) {
-		return std::abs(coor - B) < EPS;
-	}
+//	inline bool is_max(const coor_t coor) {
+//		return std::abs(coor - B) < EPS;
+//	}
+//
+//	inline bool is_min(const coor_t coor) {
+//		return std::abs(coor - A) < EPS;
+//	}
 
-	inline bool is_min(const coor_t coor) {
-		return std::abs(coor - A) < EPS;
-	}
-
-	inline bool is_max_idx(const int global_idx) {
+	inline bool is_max(const int global_idx) {
 		return global_idx == N;
 	}
 
-	inline bool is_min_idx(const int global_idx) {
+	inline bool is_min(const int global_idx) {
 		return global_idx == 0;
 	}
 
-	inline bool is_border_idx(const int global_idx) {
-		return is_min_idx(global_idx) or is_max_idx(global_idx);
+	inline bool is_border(const int global_idx) {
+		return is_min(global_idx) or is_max(global_idx);
 	}
 
-	inline const int local_idx(const int global_idx) {
-		return global_idx - min_local_idx;
+	inline const int local(const int global_idx) {
+		return global_idx - min_idx;
 	}
 
 	inline const int idx_count() {
-		return max_local_idx - min_local_idx + 1;
+		return max_idx - min_idx + 1;
+	}
+
+	inline const int side_processes_count() {
+		return static_cast<int>(round(static_cast<double>(N) / idx_count()));
 	}
 };
 
@@ -140,9 +146,9 @@ public:
 	LocalProcess(const OneDimensionData & x_data, const OneDimensionData & y_data, const coor_t eps, const int rank):
 			x(x_data), y(y_data), rank(rank), eps(eps), p(size()), r(size()), g(size()) //, tau(size())
 	{
-		for (int i = x.min_local_idx; i < x.max_local_idx; ++i) {
-			for (int j = y.min_local_idx; j < y.max_local_idx; ++j) {
-				if (x.is_border_idx(i) or y.is_border_idx(j)) {
+		for (int i = x.min_idx; i <= x.max_idx; ++i) {
+			for (int j = y.min_idx; j <= y.max_idx; ++j) {
+				if (x.is_border(i) or y.is_border(j)) {
 					put(p, i, j, 0);  // can be any value
 					put(r, i, j, 0);
 				} else {
@@ -160,16 +166,74 @@ public:
 		}
 	}
 
+	void compute_tau() {
+		// copy local vector 'r' for sending neighbors
+		coor_t up[x.N], down[x.N], left[y.N], right[y.N];
+		for (int i = x.min_idx; i <= x.max_idx; ++i) {
+			if (x.is_border(i))
+				continue;
+			if (not y.is_border(y.min_idx))
+				put(up, i, y.min_idx, get(r, i, y.min_idx));
+			if (not y.is_border(y.max_idx))
+				put(down, i, y.max_idx, get(r, i, y.max_idx));
+		}
+		for (int j = y.min_idx; j <= y.max_idx; ++j) {
+			if (y.is_border(j))
+				continue;
+			if (not x.is_border(x.min_idx))
+				put(left, x.min_idx, j, get(r, x.min_idx, j));
+			if (not x.is_border(x.max_idx))
+				put(right, x.max_idx, j, get(r, x.max_idx, j));
+		}
+		// send local vector 'r' to neighbors
+		MPI_Request up_request, down_request, left_request, right_request;
+		if (not y.is_border(y.min_idx))
+			MPI_Isend(up, x.N, MPI_DOUBLE, rank - x.side_processes_count(), tag, MPI_COMM_WORLD, &up_request);
+		if (not y.is_border(y.max_idx))
+			MPI_Isend(down, x.N, MPI_DOUBLE, rank + x.side_processes_count(), tag, MPI_COMM_WORLD, &down_request);
+		if (not x.is_border(x.min_idx))
+			MPI_Isend(left, y.N, MPI_DOUBLE, rank - y.side_processes_count(), tag, MPI_COMM_WORLD, &left_request);
+		if (not x.is_border(x.max_idx))
+			MPI_Isend(right, y.N, MPI_DOUBLE, rank + y.side_processes_count(), tag, MPI_COMM_WORLD, &right_request);
+
+		// TODO: compute local delta_r
+
+		subarea_t delta_r(size());
+		coor_t numerator = 0.0, denominator = 0.0;
+		for (int i = x.min_idx; i <= x.max_idx; ++i) {
+			if (x.is_border(i))
+				continue;
+			for (int j = y.min_idx; j <= y.max_idx; ++j) {
+				if (y.is_border(j))
+					continue;
+				numerator += x.h(i) * y.h(j) * get(r, i, j) * get(r, i, j);
+				denominator -= x.h(i) * y.h(j) * get(delta_r, i, j) * get(r, i, j);
+			}
+		}
+		coor_t send_data[2], receive_data[2];
+		send_data[0] = numerator;
+		send_data[1] = denominator;
+		MPI_Allreduce(send_data, receive_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+	}
+
 	inline int size() {
 		return x.N * y.N;
 	}
 
 	inline const coor_t & get(const subarea_t & a, const int i, const int j) {
-		return a[x.local_idx(i) * x.N + y.local_idx(j)];
+		return a[x.local(i) * x.N + y.local(j)];
 	}
 
 	inline const coor_t & put(subarea_t & a, const int i, const int j, const coor_t v) {
-		return a[x.local_idx(i) * x.N + y.local_idx(j)] = v;
+		return a[x.local(i) * x.N + y.local(j)] = v;
+	}
+
+	inline const coor_t & put(coor_t a[], const int i, const int j, const coor_t v) {
+		return a[x.local(i) * x.N + y.local(j)] = v;
+	}
+
+	inline const coor_t & get(const coor_t a[], const int i, const int j) {
+		return a[x.local(i) * x.N + y.local(j)];
 	}
 
 };
@@ -244,9 +308,9 @@ int main(int argc, char * argv[]) {
 		OneDimensionData x_data = OneDimensionData(N, 0, 2, 3 / 2, x_range.first, x_range.second);
 		OneDimensionData y_data = OneDimensionData(N, 0, 2, 3 / 2, y_range.first, y_range.second);
 //
-		std::cout << rank << " x " << x_data.min_local_idx << '-' << x_data.max_local_idx
+		std::cout << rank << " x " << x_data.min_idx << '-' << x_data.max_idx
 		          << "=" << x_data.idx_count()
-		          << " y " << y_data.min_local_idx << ':' << y_data.max_local_idx
+		          << " y " << y_data.min_idx << ':' << y_data.max_idx
 		          << "=" << y_data.idx_count() << std::endl;
 	}
 
