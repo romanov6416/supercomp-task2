@@ -119,6 +119,10 @@ public:
 	inline const int local_idx(const int global_idx) {
 		return global_idx - min_local_idx;
 	}
+
+	inline const int idx_count() {
+		return max_local_idx - min_local_idx + 1;
+	}
 };
 
 
@@ -161,8 +165,7 @@ public:
 	}
 
 	inline const coor_t & get(const subarea_t & a, const int i, const int j) {
-		return a[x.local_idx(i) *
-				         x.N + y.local_idx(j)];
+		return a[x.local_idx(i) * x.N + y.local_idx(j)];
 	}
 
 	inline const coor_t & put(subarea_t & a, const int i, const int j, const coor_t v) {
@@ -173,20 +176,28 @@ public:
 
 
 inline std::pair<int, int> compute_subfield_size(
-		const int target_n, const int max_n, const int max_index) {
-	int cur_n = max_n - 1;
-	int max_local_idx = max_index;
-	int step = max_index / max_n;
+		const int rank, const int side_n, const int count_indexes, bool on_side) {
+	const int target_n = on_side ? rank % side_n : rank / side_n;
+	int step = count_indexes / side_n;
+	if (count_indexes % side_n == 0) {
+		int min_local_idx = (count_indexes / side_n) * target_n;
+		int max_local_idx = min_local_idx + step - 1;
+		return std::make_pair(min_local_idx, max_local_idx);
+	}
+	int cur_n = side_n - 1;
+	int max_local_idx = count_indexes - 1;
 	// compute small fields
-	while (cur_n != target_n and max_local_idx % (step + 1) > 0) {
-		cur_n -= 1;
+	while (cur_n != target_n and (max_local_idx + 1) % (step + 1) != 0) {
+		--cur_n;
 		max_local_idx -= step;
 	}
-	++step;
-	// compute big fields
-	while (cur_n != target_n) {
-		cur_n -= 1;
-		max_local_idx -= step;
+	if ((max_local_idx + 1) % (step + 1) == 0) {
+		++step;
+		// compute big fields
+		while (cur_n != target_n) {
+			--cur_n;
+			max_local_idx -= step;
+		}
 	}
 	int min_local_idx = max_local_idx - step + 1;
 	return std::make_pair(min_local_idx, max_local_idx);
@@ -211,6 +222,7 @@ int main(int argc, char * argv[]) {
 	// compute process on X and Y axes
 	MPI_Comm_size(MPI_COMM_WORLD, &process_count);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	process_count = 12;
 
 	std::cout << "process_count = " << process_count << std::endl;
 
@@ -222,19 +234,22 @@ int main(int argc, char * argv[]) {
 	// a - process number (X axes)
 	// b - process number (Y axes)
 	// compute size on X axes
-	std::cout << "a = " << a << std::endl;
-	std::cout << "b = " << b << std::endl;
-	std::cout << "hear" << std::endl;
+//	std::cout << "a = " << a << std::endl;
+//	std::cout << "b = " << b << std::endl;
+//	std::cout << "hear" << std::endl;
+	for (int i = 0; i < process_count; ++i) {
+		rank = i;
+		std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true);
+		std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false);
+		OneDimensionData x_data = OneDimensionData(N, 0, 2, 3 / 2, x_range.first, x_range.second);
+		OneDimensionData y_data = OneDimensionData(N, 0, 2, 3 / 2, y_range.first, y_range.second);
 //
-//	std::pair<int,int> x_range = compute_subfield_size(rank % a, a - 1, N);
-//	std::pair<int,int> y_range = compute_subfield_size(rank % b, b - 1, N);
-//	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3/2, x_range.first, x_range.second);
-//	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3/2, y_range.first, y_range.second);
+//		std::cout << rank << " x " << x_data.min_local_idx << '-' << x_data.max_local_idx
+//		          << "=" << x_data.idx_count()
+//		          << " y " << y_data.min_local_idx << ':' << y_data.max_local_idx
+//		          << "=" << y_data.idx_count() << std::endl;
+	}
 
-//
-//	std::cout << rank << " x " << x_data.min_local_idx << ':' << x_data.max_local_idx
-//	                  << " y " << y_data.min_local_idx << ':' << y_data.max_local_idx
-//	          << std::endl;
 	MPI_Finalize();
 	return 0;
 }
