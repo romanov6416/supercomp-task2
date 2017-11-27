@@ -176,15 +176,15 @@ public:
 
 
 inline std::pair<int, int> compute_subfield_size(
-		const int rank, const int side_n, const int count_indexes, bool on_side) {
-	const int target_n = on_side ? rank % side_n : rank / side_n;
-	int step = count_indexes / side_n;
-	if (count_indexes % side_n == 0) {
-		int min_local_idx = (count_indexes / side_n) * target_n;
+		const int rank, const int n_side, const int count_indexes, bool on_side, const int row_length) {
+	const int target_n = on_side ? rank % n_side : rank / row_length;
+	int step = count_indexes / n_side;
+	if (count_indexes % n_side == 0) {
+		int min_local_idx = (count_indexes / n_side) * target_n;
 		int max_local_idx = min_local_idx + step - 1;
 		return std::make_pair(min_local_idx, max_local_idx);
 	}
-	int cur_n = side_n - 1;
+	int cur_n = n_side - 1;
 	int max_local_idx = count_indexes - 1;
 	// compute small fields
 	while (cur_n != target_n and (max_local_idx + 1) % (step + 1) != 0) {
@@ -239,15 +239,15 @@ int main(int argc, char * argv[]) {
 //	std::cout << "hear" << std::endl;
 	for (int i = 0; i < process_count; ++i) {
 		rank = i;
-		std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true);
-		std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false);
+		std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
+		std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
 		OneDimensionData x_data = OneDimensionData(N, 0, 2, 3 / 2, x_range.first, x_range.second);
 		OneDimensionData y_data = OneDimensionData(N, 0, 2, 3 / 2, y_range.first, y_range.second);
 //
-//		std::cout << rank << " x " << x_data.min_local_idx << '-' << x_data.max_local_idx
-//		          << "=" << x_data.idx_count()
-//		          << " y " << y_data.min_local_idx << ':' << y_data.max_local_idx
-//		          << "=" << y_data.idx_count() << std::endl;
+		std::cout << rank << " x " << x_data.min_local_idx << '-' << x_data.max_local_idx
+		          << "=" << x_data.idx_count()
+		          << " y " << y_data.min_local_idx << ':' << y_data.max_local_idx
+		          << "=" << y_data.idx_count() << std::endl;
 	}
 
 	MPI_Finalize();
