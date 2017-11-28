@@ -188,7 +188,6 @@ struct func_data_t {
 	}
 
 	~func_data_t() {
-//		std::cout << "this ptr " << this << std::endl;
 		delete[] up;
 		delete[] down;
 		delete[] left;
@@ -425,25 +424,31 @@ private:
 
 
 	void send_recv_to(func_tag_t func_tag, action_t send_act, action_t receive_act,
-	                  coor_line_t sent_array, coor_line_t receive_array, MPI_Request &response) {
+	                  coor_line_t sent_array, coor_line_t receive_array, MPI_Request &response,
+	                  const int idx_count, const int target_rank
+	) {
 		MPI_Request request;
 		// async send and receive to/from neighbors
-		MPI_Isend(sent_array, x.idx_count(), MPI_DOUBLE, rank - x.side_processes_count(),
+		MPI_Isend(sent_array, idx_count, MPI_DOUBLE, target_rank,
 		          get_tag(send_act, func_tag), MPI_COMM_WORLD, &request);
-		MPI_Irecv(receive_array, x.idx_count(), MPI_DOUBLE, rank - x.side_processes_count(),
+		MPI_Irecv(receive_array, idx_count, MPI_DOUBLE, target_rank,
 		          get_tag(receive_act, func_tag), MPI_COMM_WORLD, &response);
 	}
 
 	void send_recv(sent_data_t & sent_data, func_data_t &func_data, func_tag_t func_tag, MPI_Request * responses) {
 		int counter = 0;
 		if (not is_global_up())
-			send_recv_to(func_tag, SEND_UP, RECEIVE_UP, sent_data.sent_up, func_data.up, responses[counter++]);
+			send_recv_to(func_tag, SEND_UP, RECEIVE_UP, sent_data.sent_up, func_data.up,
+			             responses[counter++], x.idx_count(), rank - x.side_processes_count());
 		if (not is_global_down())
-			send_recv_to(func_tag, SEND_DOWN, RECEIVE_DOWN, sent_data.sent_down, func_data.down, responses[counter++]);
+			send_recv_to(func_tag, SEND_DOWN, RECEIVE_DOWN, sent_data.sent_down, func_data.down,
+			             responses[counter++], x.idx_count(), rank + x.side_processes_count());
 		if (not is_global_left())
-			send_recv_to(func_tag, SEND_LEFT, RECEIVE_LEFT, sent_data.sent_left, func_data.left, responses[counter++]);
+			send_recv_to(func_tag, SEND_LEFT, RECEIVE_LEFT, sent_data.sent_left, func_data.left,
+			             responses[counter++], y.idx_count(), rank - 1);
 		if (not is_global_right())
-			send_recv_to(func_tag, SEND_RIGHT, RECEIVE_RIGHT, sent_data.sent_right, func_data.right, responses[counter]);
+			send_recv_to(func_tag, SEND_RIGHT, RECEIVE_RIGHT, sent_data.sent_right, func_data.right,
+			             responses[counter], y.idx_count(), rank + 1);
 	}
 
 	void wait_async_complete(MPI_Request * responses) {
@@ -852,8 +857,9 @@ int main(int argc, char * argv[]) {
 //	std::cout << "a = " << a << std::endl;
 //	std::cout << "b = " << b << std::endl;
 //	std::cout << "hear" << std::endl;
-	for (int i = 0; i < process_count; ++i) {
-		rank = i;
+//	for (int i = 0; i < process_count; ++i) {
+//		rank = i;
+	std::cout << "rank " << rank << std::endl;
 		std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
 		std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
 		OneDimensionData x_data = OneDimensionData(N, 0, 2, 3 / 2, x_range.first, x_range.second);
@@ -868,7 +874,7 @@ int main(int argc, char * argv[]) {
 		          << "=" << x_data.idx_count()
 		          << " y " << y_data.min_idx << ':' << y_data.max_idx
 		          << "=" << y_data.idx_count() << std::endl;
-	}
+//	}
 
 	MPI_Finalize();
 	return 0;

@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 2.8)
 project(task2)
 
 set(CMAKE_CXX_STANDARD 98)
-set(CMAKE_CXX_COMPILER /usr/bin/mpic++)
+set(CMAKE_CXX_COMPILER mpic++)
 
 set(SOURCE_FILES main.cpp)
 add_executable(task2 ${SOURCE_FILES})
