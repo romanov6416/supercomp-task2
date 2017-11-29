@@ -11,10 +11,6 @@ typedef std::vector<coor_t> subarea_t;
 typedef coor_t * coor_line_t;
 typedef const coor_t (*func_t) (const coor_t x, const coor_t y);
 
-//const coor_t EPS = 0.00001;
-//const coor_t A1 = 0.0;
-//const coor_t A2 = 2.0;
-
 
 const subarea_t operator-(const subarea_t & a, const subarea_t & b) {
 	subarea_t tmp(a.size());
@@ -23,15 +19,6 @@ const subarea_t operator-(const subarea_t & a, const subarea_t & b) {
 	}
 	return tmp;
 }
-
-
-//struct Point {
-//	coor_t x;
-//	coor_t y;
-//
-//	Point(){}
-//	Point(const coor_t init_x, const coor_t init_y): x(init_x), y(init_y) {}
-//};
 
 inline const coor_t F(const coor_t x, const coor_t y) {
 	coor_t x_plus_y_2 = (x + y) * (x + y);
@@ -107,14 +94,6 @@ public:
 		return 0.5 * (h(global_idx) + h(global_idx - 1));
 	}
 
-//	inline bool is_max(const coor_t coor) {
-//		return std::abs(coor - B) < EPS;
-//	}
-//
-//	inline bool is_min(const coor_t coor) {
-//		return std::abs(coor - A) < EPS;
-//	}
-
 	inline bool is_global_max(const int global_idx) {
 		return global_idx == N - 1;
 	}
@@ -151,11 +130,6 @@ enum action_t {
 	RECEIVE_LEFT=SEND_RIGHT, RECEIVE_RIGHT=SEND_LEFT
 };
 
-struct neighbor_info_t {
-		action_t send_action;
-		action_t receive_action;
-};
-
 
 struct func_data_t {
 	coor_line_t up;
@@ -176,15 +150,30 @@ struct func_data_t {
 			local(x_idx_count * y_idx_count)
 	{}
 
-	func_data_t & operator=(func_data_t & another) const {
+	func_data_t & operator=(const func_data_t & another) {
 		for (int i = 0; i < x_idx_count; ++i) {
-			another.up[i] = up[i];
-			another.down[i] = down[i];
+			up[i] = another.up[i];
+			down[i] = another.down[i];
 		}
 		for (int j = 0; j < y_idx_count; ++j) {
-			another.left[j] = left[j];
-			another.right[j] = right[j];
+			left[j] = another.left[j];
+			right[j] = another.right[j];
 		}
+		return *this;
+	}
+
+	bool operator==(const func_data_t & another) {
+		for (int i = 0; i < x_idx_count; ++i) {
+			if (up[i] != another.up[i] or down[i] != another.down[i]) {
+				return false;
+			}
+		}
+		for (int j = 0; j < y_idx_count; ++j) {
+			if (left[j] != another.left[j] or right[j] != another.right[j]) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	~func_data_t() {
@@ -233,83 +222,52 @@ private:
 	// <belong> - is one of 'local', 'neighbor'
 	// <function> - is one of 'p', 'r', 'g'
 
+
+
 	// init value descriptions
 
-	inline const coor_t compute_init_internal_p(const int i, const int j) {
+	const coor_t compute_init_internal_p(const int i, const int j) {
+//		return phi(x.coor(i), y.coor(j));
+		return 0;
+	}
+
+	const coor_t compute_init_broad_p(const int i, const int j) {
 		return phi(x.coor(i), y.coor(j));
 	}
 
-	inline const coor_t compute_init_internal_r(const int i, const int j) {
-		return - delta_h(phi, i, j) - F(x.coor(i), y.coor(j));
+	const coor_t compute_init_internal_r(const int i, const int j) {
+		return - delta_h(p, i, j) - F(x.coor(i), y.coor(j));
+	}
+
+	const coor_t compute_init_broad_r(const int i, const int j) {
+		return 0;
 	}
 
 	inline const coor_t compute_init_local_g(const int i, const int j) {
 		return get(r.local, i, j);
 	}
 
-	// init function of local
+	// init function for local function values
 
-	inline void calculate_init_internal_local(const int i, const int j) {
-		calculate_init_internal_local_p(i, j);
-		calculate_init_internal_local_r(i, j);
-		calculate_init_local_g(i, j);
-	}
-
-	inline const coor_t calculate_init_internal_local_p(const int i, const int j) {
+	inline const coor_t calculate_init_internal_p(const int i, const int j) {
 		return put(p.local, i, j, compute_init_internal_p(i, j));
 	}
 
-	inline const coor_t calculate_init_internal_local_r(const int i, const int j) {
+	inline const coor_t calculate_init_broad_p(const int i, const int j) {
+		return put(p.local, i, j, compute_init_broad_p(i, j));
+	}
+
+	inline const coor_t calculate_init_internal_r(const int i, const int j) {
 		return put(r.local, i, j, compute_init_internal_r(i, j));
+	}
+
+	inline const coor_t calculate_init_broad_r(const int i, const int j) {
+		return put(r.local, i, j, compute_init_broad_r(i, j));
 	}
 
 	inline const coor_t calculate_init_local_g(const int i, const int j) {
 		return put(g.local, i, j, compute_init_local_g(i, j));
 	}
-
-
-
-
-	inline void calculate_init_broad_local(const int i, const int j) {
-		calculate_init_broad_local_p(i, j);
-		init_broad_local_r(i, j);
-		calculate_init_local_g(i, j);
-	}
-
-	inline const coor_t calculate_init_broad_local_p(const int i, const int j) {
-		return put(p.local, i, j, 0);  // can be any value
-	}
-
-	inline const coor_t init_broad_local_r(const int i, const int j) {
-		return put(r.local, i, j, 0);
-	}
-
-	// init neighbors
-
-	inline void calculate_init_neighbor_down(const int i, const int j) {
-		p.down[i] = compute_init_internal_p(i, j + 1);
-		r.down[i] = compute_init_internal_r(i, j + 1);
-		g.down[i] = r.down[i];
-	}
-
-	inline void calculate_init_neighbor_up(const int i, const int j) {
-		p.up[i] = compute_init_internal_p(i, j - 1);
-		r.up[i] = compute_init_internal_r(i, j - 1);
-		g.up[i] = r.up[i];
-	}
-
-	inline void calculate_init_neighbor_left(const int i, const int j) {
-		p.left[j] = compute_init_internal_p(i - 1, j);
-		r.left[j] = compute_init_internal_r(i - 1, j);
-		g.left[j] = r.left[j];
-	}
-
-	inline void calculate_init_neighbor_right(const int i, const int j) {
-		p.right[j] = compute_init_internal_p(i + 1, j);
-		r.right[j] = compute_init_internal_r(i + 1, j);
-		g.right[j] = r.right[j];
-	}
-
 
 
 
@@ -382,7 +340,7 @@ private:
 
 
 	inline size_t size() {
-		return x.N * y.N;
+		return static_cast<size_t>(x.N * y.N);
 	}
 
 	inline const coor_t & get(const subarea_t & a, const int i, const int j) {
@@ -459,11 +417,14 @@ private:
 	void update_sent_vector(sent_data_t & sent_data, const int i, const int j, const coor_t value) {
 		if (i == x.min_idx and not x.is_global_min(i)) {
 			sent_data.sent_left[j] = value;
-		} else if (i == x.max_idx and not x.is_global_max(i)) {
+		}
+		if (i == x.max_idx and not x.is_global_max(i)) {
 			sent_data.sent_right[j] = value;
-		} else if (j == y.min_idx and not y.is_global_min(j)) {
+		}
+		if (j == y.min_idx and not y.is_global_min(j)) {
 			sent_data.sent_up[i] = value;
-		} else if (j == y.max_idx and not y.is_global_max(j)) {
+		}
+		if (j == y.max_idx and not y.is_global_max(j)) {
 			sent_data.sent_down[i] = value;
 		}
 	}
@@ -512,133 +473,58 @@ public:
 			++neighbor_counter;
 		if (not is_global_down())
 			++neighbor_counter;
-
-		// init for internal points
-		int i, j;
-		for (i = x.min_idx + 1; i <= x.max_idx - 1; ++i) {
-			for (j = y.min_idx + 1; j <= y.max_idx - 1; ++j) {
-				calculate_init_internal_local(i, j);
+		// init 'p'
+		for (int i = x.min_idx; i <= x.max_idx; ++i) {
+			for (int j = y.min_idx; j <= y.max_idx; ++j) {
+				// init local variables
+				if (x.is_border(i) or x.is_border(j)) {
+					calculate_init_broad_p(i, j);
+				} else {
+					calculate_init_internal_p(i, j);
+				}
+				calculate_init_local_g(i, j);
+				// init neighbors variables
+				if (j == y.min_idx and not is_global_up()) {
+					p.up[i] = compute_init_internal_p(i, j);
+				}
+				if (j == y.max_idx and not is_global_down()) {
+					p.down[i] = compute_init_internal_p(i, j);
+				}
+				if (i == x.min_idx and not is_global_left()) {
+					p.left[j] = compute_init_internal_p(i, j);
+				}
+				if (i == x.max_idx and not is_global_right()) {
+					p.right[j] = compute_init_internal_p(i, j);
+				}
 			}
 		}
-		// init left process broad
-		i = x.min_idx;
-		if (x.is_global_min(i)) {
-			// the process is the most left
-			for (j = y.min_idx; j <= y.max_idx; ++j) {
-				calculate_init_broad_local(i, j);
-			}
-		} else {
-			// init internal right
-			for (j = y.min_idx + 1; j <= y.max_idx - 1; ++j) {
-				calculate_init_neighbor_left(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init left up point
-			j = y.min_idx;
-			if (y.is_global_min(j)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_left(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init left down point
-			j = y.max_idx;
-			if (y.is_global_max(j)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_left(i, j);
-				calculate_init_internal_local(i, j);
-			}
-		}
-
-		// init right process broad
-		i = x.max_idx;
-		if (x.is_global_max(i)) {
-			// the process is the most right
-			for (j = y.min_idx; j <= y.max_idx; ++j) {
-				calculate_init_broad_local(i, j);
-			}
-		} else {
-			// init internal right
-			for (j = y.min_idx + 1; j <= y.max_idx - 1; ++j) {
-				calculate_init_neighbor_right(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init right up point
-			j = y.min_idx;
-			if (y.is_global_min(j)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_right(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init right down point
-			j = y.max_idx;
-			if (y.is_global_max(j)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_right(i, j);
-				calculate_init_internal_local(i, j);
-			}
-		}
-		// init up process broad
-		j = y.min_idx;
-		if (y.is_global_min(i)) {
-			// the process is the most up
-			for (i = x.min_idx; i <= y.max_idx; ++i) {
-				calculate_init_broad_local(i, j);
-			}
-		} else {
-			// init internal up points
-			for (i = x.min_idx + 1; i <= y.max_idx - 1; ++i) {
-				calculate_init_neighbor_up(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init left up point
-			i = x.min_idx;
-			if (x.is_global_min(i)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_up(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init right up point
-			i = x.max_idx;
-			if (x.is_global_max(i)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_up(i, j);
-				calculate_init_internal_local(i, j);
-			}
-		}
-		// init down process broad
-		j = y.max_idx;
-		if (y.is_global_max(i)) {
-			// the process is the most down
-			for (i = x.min_idx; i <= y.max_idx; ++i) {
-				calculate_init_broad_local(i, j);
-			}
-		} else {
-			// init internal down points
-			for (i = x.min_idx + 1; i <= y.max_idx - 1; ++i) {
-				calculate_init_neighbor_down(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init left down point
-			i = x.min_idx;
-			if (x.is_global_min(i)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_down(i, j);
-				calculate_init_internal_local(i, j);
-			}
-			// init right down point
-			i = x.max_idx;
-			if (x.is_global_max(i)) {
-				calculate_init_broad_local(i, j);
-			} else {
-				calculate_init_neighbor_down(i, j);
-				calculate_init_internal_local(i, j);
+		// init 'r' and 'g'
+		for (int i = x.min_idx; i <= x.max_idx; ++i) {
+			for (int j = y.min_idx; j <= y.max_idx; ++j) {
+				// init local variables
+				if (x.is_border(i) or x.is_border(j)) {
+					calculate_init_broad_r(i, j);
+				} else {
+					calculate_init_internal_r(i, j);
+				}
+				calculate_init_local_g(i, j);
+				// init neighbors variables
+				if (j == y.min_idx and not is_global_up()) {
+					r.up[i] = compute_init_internal_r(i, j);
+					g.up[i] = r.up[i];
+				}
+				if (j == y.max_idx and not is_global_down()) {
+					r.down[i] = compute_init_internal_r(i, j);
+					g.down[i] = r.down[i];
+				}
+				if (i == x.min_idx and not is_global_left()) {
+					r.left[j] = compute_init_internal_r(i, j);
+					g.left[j] = r.left[j];
+				}
+				if (i == x.max_idx and not is_global_right()) {
+					r.right[j] = compute_init_internal_r(i, j);
+					g.right[j] = r.right[j];
+				}
 			}
 		}
 	}
@@ -656,25 +542,34 @@ public:
 		send_data[0] = numerator;
 		send_data[1] = denominator;
 		MPI_Allreduce(send_data, receive_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+		numerator = receive_data[0];
+		denominator = receive_data[1];
 		return numerator / denominator;
 	}
 
 	inline const coor_t compute_pij(const int i, const int j, const coor_t tau) {
-		if (x.is_border(i) or y.is_border(j))
+		if (x.is_border(i) or y.is_border(j)) {
 			return get(p.local, i, j);
-		else
+		} else {
 			return get(p.local, i, j) - tau * get(r.local, i, j);
+		}
 	}
 
 	void calculate_new_p(const coor_t tau) {
 		int i, j;
+//		coor_t min_coor=0, max_coor=9e99;
 		for (i = x.min_idx; i <= x.max_idx; ++i) {
 			for (j = y.min_idx; j <= y.max_idx; ++j) {
 				coor_t value = compute_pij(i, j, tau);
+//				coor_t v = std::abs(value - phi(x.coor(i), y.coor(j)));
+//				min_coor = v < min_coor ? v : min_coor;
+//				max_coor = v < max_coor ? max_coor : v;
 				put(new_p.local, i, j, value);
 				update_sent_vector(sent_p, i, j, value);
 			}
 		}
+//		std::cout << min_coor << "-" << max_coor << std::endl;
+
 	}
 
 	const coor_t compute_rij(const int i, const int j) {
@@ -699,8 +594,8 @@ public:
 		coor_t numerator = 0.0, denominator = 0.0;
 		for (int i = x.min_idx; i <= x.max_idx; ++i) {
 			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				numerator -= scalar_component(delta_h(new_r, i, j), get(g.local, i, j), i, j);
-				denominator -= scalar_component(delta_h(g, i, j), get(g.local, i, j), i, j);
+				numerator += scalar_component( - delta_h(new_r, i, j), get(g.local, i, j), i, j);
+				denominator += scalar_component( - delta_h(g, i, j), get(g.local, i, j), i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -726,8 +621,8 @@ public:
 		}
 	}
 
-	std::pair<coor_t,coor_t> compute_error_and_difference() {
-		// compute local p_norm and denominator for tau
+	std::pair<coor_t,coor_t> compute_difference_and_error() {
+		// compute local difference and error for tau
 		coor_t difference = 0.0, error = 0.0;
 		for (int i = x.min_idx; i <= x.max_idx; ++i) {
 			for (int j = y.min_idx; j <= y.max_idx; ++j) {
@@ -735,7 +630,6 @@ public:
 				difference += scalar_component(buf1, buf1, i, j);
 				coor_t buf2 = get(new_p.local, i, j) - solution(x.coor(i), y.coor(j));
 				error += scalar_component(buf2, buf2, i, j);
-//				denominator -= scalar_component(delta_h(g, i, j), get(g.local, i, j), i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -750,25 +644,33 @@ public:
 	std::pair<coor_t,coor_t> calculate_iteration() {
 		init_statuses();
 
+		std::cout << "compute tau" << std::endl;
 		coor_t tau = compute_tau();
+
+		std::cout << "compute p" << std::endl;
 		calculate_new_p(tau);
 		// notify about 'p'
 		send_recv(sent_p, new_p, P_TAG, p_responses);
 		// wait sync p
 		wait_async_complete(p_responses);
 
+		std::cout << "compute r" << std::endl;
 		calculate_new_r();
 		// notify about 'r'
 		send_recv(sent_r, new_r, R_TAG, r_responses);
 		// wait sync 'r'
 		wait_async_complete(r_responses);
 
+		std::cout << "compute alpha" << std::endl;
 		coor_t alpha = compute_alpha();
+
+		std::cout << "compute g" << std::endl;
 		calculate_new_g(alpha);
 		send_recv(sent_g, new_g, G_TAG, g_responses);
 		wait_async_complete(g_responses);
 
-		return compute_error_and_difference();
+		std::cout << "compute difference and error" << std::endl;
+		return compute_difference_and_error();
 	}
 
 
@@ -782,6 +684,7 @@ public:
 			std::cout << iteration << ") " << difference << " " << error << std::endl;
 			if (difference < eps)
 				break;
+			std::cout << "p == new_p is " << (p == new_p ? "true" : "false") << std::endl;
 			p = new_p;
 			r = new_r;
 			g = new_g;
