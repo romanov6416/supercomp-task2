@@ -159,6 +159,9 @@ struct func_data_t {
 			left[j] = another.left[j];
 			right[j] = another.right[j];
 		}
+		local = another.local;
+		x_idx_count = another.x_idx_count;
+		y_idx_count = another.y_idx_count;
 		return *this;
 	}
 
@@ -173,7 +176,9 @@ struct func_data_t {
 				return false;
 			}
 		}
-		return true;
+		return local == another.local
+		       and x_idx_count == another.x_idx_count
+		       and y_idx_count == another.y_idx_count;
 	}
 
 	~func_data_t() {
@@ -184,6 +189,19 @@ struct func_data_t {
 	}
 
 };
+
+
+std::ostream & operator<<(std::ostream & out, const func_data_t & func_data) {
+//	int sz = func_data.local.size();
+//	int sz = 1000 * 1000;
+//	std::cout << sz << std::endl;
+	for (int k = 0; k < func_data.local.size(); ++k) {
+//	for (int k = 0; k < 1000 * 1000; ++k) {
+//	for (int k = 0; k < sz; ++k) {
+//		out << func_data.local[k] << ' ';
+//		out << k << ' ';
+	}
+}
 
 
 struct sent_data_t {
@@ -649,6 +667,8 @@ public:
 
 		std::cout << "compute p" << std::endl;
 		calculate_new_p(tau);
+//		std::cout << new_p.local.size() << std::endl;
+		std::cout << new_p << std::endl;
 		// notify about 'p'
 		send_recv(sent_p, new_p, P_TAG, p_responses);
 		// wait sync p
