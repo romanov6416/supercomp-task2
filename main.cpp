@@ -11,6 +11,186 @@ typedef std::vector<coor_t> subarea_t;
 typedef coor_t * coor_line_t;
 typedef coor_t (*func_t) (const coor_t x, const coor_t y);
 
+enum func_tag_t {P_TAG, G_TAG, R_TAG, NULL_TAG};
+
+enum action_t {
+	SEND_UP, SEND_DOWN, SEND_LEFT, SEND_RIGHT,
+	RECEIVE_UP=SEND_DOWN, RECEIVE_DOWN=SEND_UP,
+	RECEIVE_LEFT=SEND_RIGHT, RECEIVE_RIGHT=SEND_LEFT
+};
+
+
+inline int get_tag(action_t act, func_tag_t v) {
+	return act + (v << 2);
+}
+
+
+
+
+struct func_data_t {
+	std::vector< std::vector<coor_t> > data;
+	func_tag_t tag;
+
+	func_data_t(func_tag_t tag): tag(tag) {}
+
+	inline void resize(const size_t x_size, const size_t y_size) {
+		data.resize(x_size);
+		for (size_t i = 0; i < data.size(); ++i)
+			data[i].resize(y_size);
+	}
+
+	inline size_t size_x() {
+		return data.size();
+	}
+
+	inline size_t size_y() {
+		return data[0].size();
+	}
+
+	inline const coor_t & operator()(const size_t i, const size_t j) const {
+		return data[i][j];
+	}
+
+	coor_t & operator()(const size_t local_i, const size_t local_j) {
+		return data[local_i][local_j];
+	}
+
+	bool operator==(const func_data_t & another) {
+		return data == another.data;
+	}
+};
+
+
+class ISendReceive {
+public:
+	virtual void send_recv(func_data_t & func_data) = 0;
+	virtual void wait(func_data_t & func_data) = 0;
+};
+
+
+class BaseSendReceive: public ISendReceive {
+public:
+	action_t send_dir;
+	action_t receive_dir;
+	MPI_Request request;
+	MPI_Request response;
+	const int target_rank;
+
+	BaseSendReceive(action_t send_direction, action_t receive_direction, const int target_rank):
+		send_dir(send_direction), receive_dir(receive_direction),
+		request(), response(), target_rank(target_rank)
+	{}
+
+
+	void mpi_send_mpi_recv(func_tag_t func_tag, const size_t array_size,
+	                       coor_t * sent_array, coor_t * receive_array) {
+		// async send and receive to/from neighbors
+		MPI_Isend(sent_array, static_cast<int>(array_size), MPI_DOUBLE, target_rank,
+		          get_tag(send_dir, func_tag), MPI_COMM_WORLD, &request);
+		MPI_Irecv(receive_array, static_cast<int>(array_size), MPI_DOUBLE, target_rank,
+		          get_tag(receive_dir, func_tag), MPI_COMM_WORLD, &response);
+	}
+
+};
+
+
+class SendReceiveEmpty: public ISendReceive {
+public:
+	virtual void send_recv(func_data_t & ) {}
+	virtual void wait(func_data_t &) {}
+};
+
+
+class SendReceiveUp: public BaseSendReceive {
+	std::vector<coor_t> sent_data;
+	std::vector<coor_t> receive_data;
+
+public:
+	SendReceiveUp(const size_t size, const int target_rank):
+			BaseSendReceive(SEND_UP, RECEIVE_UP, target_rank),
+			sent_data(size), receive_data(size)
+	{}
+
+	virtual void send_recv(func_data_t & func_data) {
+		for (size_t i = 0; i < sent_data.size(); ++i)
+			sent_data[i] = func_data(i,1);
+		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
+	}
+
+	virtual void wait(func_data_t & func_data) {
+		MPI_Status status;
+		MPI_Wait(&request, &status);
+		for (size_t i = 0; i < receive_data.size(); ++i)
+			func_data(i,0) = receive_data[i];
+	}
+};
+
+
+class SendReceiveDown: public BaseSendReceive {
+	std::vector<coor_t> sent_data;
+	std::vector<coor_t> receive_data;
+
+public:
+	SendReceiveDown(const size_t size, const int target_rank):
+			BaseSendReceive(SEND_DOWN, RECEIVE_DOWN, target_rank),
+			sent_data(size), receive_data(size)
+	{}
+
+	virtual void send_recv(func_data_t & func_data) {
+		for (size_t j = 0; j < sent_data.size(); ++j)
+			sent_data[j] = func_data(j, func_data.size_y() - 2);
+		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
+	}
+
+	virtual void wait(func_data_t & func_data) {
+		MPI_Status status;
+		MPI_Wait(&request, &status);
+		for (size_t i = 0; i < receive_data.size(); ++i)
+			func_data(i, func_data.size_y() - 1) = receive_data[i];
+	}
+};
+
+
+class SendReceiveLeft: public BaseSendReceive {
+
+public:
+	SendReceiveLeft(const int target_rank):
+			BaseSendReceive(SEND_LEFT, RECEIVE_LEFT, target_rank)
+	{}
+
+	virtual void send_recv(func_data_t & func_data) {
+		mpi_send_mpi_recv(func_data.tag, func_data.size_y(),
+		                  &func_data(1,0), &func_data(0,0));
+	}
+
+	virtual void wait(func_data_t &) {
+		MPI_Status status;
+		MPI_Wait(&request, &status);
+	}
+};
+
+
+class SendReceiveRight: public BaseSendReceive {
+
+public:
+	SendReceiveRight(const int target_rank):
+			BaseSendReceive(SEND_RIGHT, RECEIVE_RIGHT, target_rank)
+	{}
+
+	virtual void send_recv(func_data_t & func_data) {
+		mpi_send_mpi_recv(func_data.tag, func_data.size_y(),
+		                  &func_data(func_data.size_x() - 2,0),
+		                  &func_data(func_data.size_x() - 1,0));
+	}
+
+	virtual void wait(func_data_t &) {
+		MPI_Status status;
+		MPI_Wait(&request, &status);
+	}
+};
+
+
+
 
 const subarea_t operator-(const subarea_t & a, const subarea_t & b) {
 	subarea_t tmp(a.size());
@@ -33,32 +213,6 @@ inline coor_t solution(const coor_t x, const coor_t y) {
 	return phi(x, y);
 }
 
-coor_t delta_h(
-		const coor_t c,
-		const coor_t l, const coor_t r,
-		const coor_t u, const coor_t d,
-		const coor_t hi, const coor_t hi_1,
-		const coor_t hj, const coor_t hj_1,
-		const coor_t average_hi, const coor_t average_hj
-) {
-	//   u
-	// l c r
-	//   d
-	coor_t first = ( (c-l)/hi_1 - (r-c)/hi ) / average_hi;
-	coor_t second = ( (c-u)/hj_1 - (d-c)/hj ) / average_hj;
-	return - (first + second);
-}
-
-
-
-//inline coor_x(const int i) {
-//
-//}
-
-//class DeltaH {
-//	const
-//};
-
 
 class OneDimensionData {
 public:
@@ -66,49 +220,57 @@ public:
 	const coor_t A;  // begin of segment
 	const coor_t B;  // end of segment
 	const coor_t q;  // eventually ratio
-	const int min_idx;
-	const int max_idx;
+	const size_t min_idx;
+	const size_t max_idx;
+	std::vector<coor_t> line;
 
 	OneDimensionData(const int N, const coor_t A, const coor_t B, const coor_t q,
-	                 const int min_local_idx, const int max_local_idx) :
-			N(N), A(A), B(B), q(q), min_idx(min_local_idx), max_idx(max_local_idx)
-	{}
+	                 const size_t min_local_idx, const size_t max_local_idx) :
+			N(N), A(A), B(B), q(q), min_idx(min_local_idx), max_idx(max_local_idx), line(N)
+	{
+		for (int i = 0; i < N; ++i) {
+			line[i] = _coor(static_cast<size_t>(i));
+		}
+	}
 
 	inline coor_t f(const coor_t t) {
 		return (pow(1 + t, q) - 1.0) / (pow(2, q) - 1);
 	}
 
-	inline coor_t coor(const int global_idx) {
+	inline coor_t coor(const size_t local_idx) {
+		return line[global(local_idx)];
+	}
+
+	inline coor_t _coor(const size_t global_idx) {
 		coor_t t = static_cast<coor_t>(global_idx) / N;
 		return B * f(t) + A * (1 - f(t));
 	}
 
-	inline coor_t h(const int global_idx) {
-//		return 0.5 * (coor(global_idx) + coor(global_idx + 1));
-		return coor(global_idx + 1) - coor(global_idx);
+	inline coor_t h(const size_t local_idx) {
+		return coor(local_idx + 1) - coor(local_idx);
 	}
 
-	inline coor_t average_h(const int global_idx) {
-		return 0.5 * (h(global_idx) + h(global_idx - 1));
+	inline coor_t average_h(const size_t local_idx) {
+		return 0.5 * (h(local_idx) + h(local_idx - 1));
 	}
 
-	inline bool is_global_max(const int global_idx) {
-		return global_idx == N - 1;
+	inline bool is_global_max(const size_t local_idx) {
+		return global(local_idx) == static_cast< size_t >(N - 1);
 	}
 
-	inline bool is_global_min(const int global_idx) {
-		return global_idx == 0;
+	inline bool is_global_min(const size_t local_idx) {
+		return global(local_idx) == 0;
 	}
 
-	inline bool is_border(const int global_idx) {
-		return is_global_min(global_idx) or is_global_max(global_idx);
+	inline bool is_border(const size_t local_idx) {
+		return is_global_min(local_idx) or is_global_max(local_idx);
 	}
 
-	inline int local(const int global_idx) {
+	inline size_t local(const int global_idx) {
 		return global_idx - min_idx;
 	}
 
-	inline int idx_count() {
+	inline size_t idx_count() {
 		return max_idx - min_idx + 1;
 	}
 
@@ -119,211 +281,49 @@ public:
 	inline size_t global_idx_count() {
 		return static_cast<size_t>(N);
 	}
-};
 
-
-enum action_t {
-	SEND_UP, SEND_DOWN, SEND_LEFT, SEND_RIGHT,
-	RECEIVE_UP=SEND_DOWN, RECEIVE_DOWN=SEND_UP,
-	RECEIVE_LEFT=SEND_RIGHT, RECEIVE_RIGHT=SEND_LEFT
-};
-
-
-struct func_data_t {
-//	coor_line_t up;
-//	coor_line_t down;
-//	coor_line_t left;
-//	coor_line_t right;
-//	subarea_t local;
-	std::vector<coor_t > data;
-	size_t x_idx_count;
-	size_t y_idx_count;
-
-	func_data_t(const size_t x_idx_count, const size_t y_idx_count):
-			data(x_idx_count * y_idx_count),
-//			up(new coor_t[x_idx_count]),
-//			down(new coor_t[x_idx_count]),
-//			left(new coor_t[y_idx_count]),
-//			right(new coor_t[y_idx_count]),
-//			local(x_idx_count * y_idx_count),
-			x_idx_count(x_idx_count),
-			y_idx_count(y_idx_count)
-	{}
-
-	const coor_t & operator()(const int i, const int j) const {
-		return data[i + j * x_idx_count];
+	template <typename T>
+	inline T global(const T local_idx) {
+		return static_cast<T>(min_idx) + local_idx;
 	}
 
-	coor_t & operator()(const int i, const int j) {
-		return data[i + j * x_idx_count];
-	}
-
-//	func_data_t & operator=(const func_data_t & another) {
-//		for (size_t i = 0; i < x_idx_count; ++i) {
-//			up[i] = another.up[i];
-//			down[i] = another.down[i];
-//		}
-//		for (size_t j = 0; j < y_idx_count; ++j) {
-//			left[j] = another.left[j];
-//			right[j] = another.right[j];
-//		}
-//		local = another.local;
-//		x_idx_count = another.x_idx_count;
-//		y_idx_count = another.y_idx_count;
-//		return *this;
-//	}
-
-	bool operator==(const func_data_t & another) {
-		return data == another.data
-		       and x_idx_count == another.x_idx_count
-		       and y_idx_count == another.y_idx_count;
+	coor_t operator[](const size_t i) {
+		return coor(static_cast<int>(i));
 	}
 };
 
 
-//std::ostream & operator<<(std::ostream & out, const func_data_t & func_data) {
-////	int sz = func_data.local.size();
-////	int sz = 1000 * 1000;
-////	std::cout << sz << std::endl;
-//	for (size_t k = 0; k < func_data.local.size(); ++k) {
-////	for (int k = 0; k < 1000 * 1000; ++k) {
-////	for (int k = 0; k < sz; ++k) {
-////		out << func_data.local[k] << ' ';
-////		out << k << ' ';
-//	}
-//	return out;
-//}
 
+class iteration_data_t {
+public:
+	func_data_t p, r, g;
 
-struct sent_data_t {
-	coor_line_t sent_up;
-	coor_line_t sent_down;
-	coor_line_t sent_left;
-	coor_line_t sent_right;
+	iteration_data_t(): p(P_TAG), r(R_TAG), g(G_TAG) {}
 
-	sent_data_t(const size_t x_idx_count, const size_t y_idx_count):
-			sent_up(new coor_t[x_idx_count]),
-			sent_down(new coor_t[x_idx_count]),
-			sent_left(new coor_t[y_idx_count]),
-			sent_right(new coor_t[y_idx_count])
-	{}
-
-	~sent_data_t() {
-		delete[] sent_up;
-		delete[] sent_down;
-		delete[] sent_left;
-		delete[] sent_right;
+	bool operator==(const iteration_data_t & other) {
+		return p == other.p and r == other.r and g == other.g;
 	}
 
+	void resize(const size_t x_size, const size_t y_size) {
+		p.resize(x_size, y_size);
+		r.resize(x_size, y_size);
+		g.resize(x_size, y_size);
+	}
 
 };
 
 
 class LocalProcess {
 private:
-	enum func_tag_t {P_TAG, G_TAG, R_TAG};
 
-	// names of service methods:
-	// <type>_<order>_<place>_<belong>_<function>
-	// <type> - is one of 'compute', 'calculate'
-	// <order> - is one of 'init', 'next'
-	// <place> - is one of 'internal', 'up', 'down', 'left', 'right', 'broad'
-	// <belong> - is one of 'local', 'neighbor'
-	// <function> - is one of 'p', 'r', 'g'
-
-
-
-	// init value descriptions
-
-	inline coor_t compute_init_internal_p() {
-//		return phi(x.coor(i), y.coor(j));
-		return 0;
+	inline coor_t delta_h(const func_data_t & a, const size_t i, const size_t j) {
+		coor_t l = (a(i,j) - a(i-1,j)) / x.h(i-1)   -   (a(i+1,j) - a(i,j)) / x.h(i);// / average_hi;
+		coor_t r = (a(i,j) - a(i,j-1)) / y.h(j-1)   -   (a(i,j+1) - a(i,j)) / y.h(j);// ) / average_hj;
+		return - (l / x.average_h(i) + r / y.average_h(j));
 	}
 
-	inline coor_t compute_init_broad_p(const int i, const int j) {
-		return phi(x.coor(i), y.coor(j));
-	}
-
-	inline coor_t compute_init_internal_r(const int i, const int j) {
-		return - delta_h(p, i, j) - F(x.coor(i), y.coor(j));
-	}
-
-	inline coor_t compute_init_broad_r() {
-		return 0;
-	}
-
-	inline coor_t compute_init_local_g(const int i, const int j) {
-		return get(r.local, i, j);
-	}
-
-	// init function for local function values
-
-	inline coor_t calculate_init_internal_p(const int i, const int j) {
-		return put(p.local, i, j, compute_init_internal_p());
-	}
-
-	inline coor_t calculate_init_broad_p(const int i, const int j) {
-		return put(p.local, i, j, compute_init_broad_p(i, j));
-	}
-
-	inline coor_t calculate_init_internal_r(const int i, const int j) {
-		return put(r.local, i, j, compute_init_internal_r(i, j));
-	}
-
-	inline coor_t calculate_init_broad_r(const int i, const int j) {
-		return put(r.local, i, j, compute_init_broad_r());
-	}
-
-	inline coor_t calculate_init_local_g(const int i, const int j) {
-		return put(g.local, i, j, compute_init_local_g(i, j));
-	}
-
-
-
-	inline int get_tag(action_t act, func_tag_t v) {
-		return act + (v << 2);
-	}
-
-	inline coor_t delta_h(const func_data_t & a, const int i, const int j) {
-		return ::delta_h(
-				get(a.local, i, j), // center
-				i-1 < x.min_idx ? a.left[j] : get(a.local, i-1, j), // left
-				i+1 > x.max_idx ? a.right[j] : get(a.local, i+1, j), // right
-				j-1 < y.min_idx ? a.up[i] : get(a.local, i, j-1), // up
-				j+1 > y.max_idx ? a.down[i] : get(a.local, i, j+1), // down
-				x.h(i), x.h(i - 1), y.h(j), y.h(j - 1),
-				x.average_h(i), y.average_h(j)
-		);
-	}
-
-	inline coor_t delta_h(func_t func, const int i, const int j) {
-		return ::delta_h(
-				func(x.coor(i), y.coor(j)),
-				func(x.coor(i-1), y.coor(j)), func(x.coor(i+1), y.coor(j)),
-				func(x.coor(i), y.coor(j-1)), func(x.coor(i), y.coor(j+1)),
-				x.h(i), x.h(i - 1), y.h(j), y.h(j - 1),
-				x.average_h(i), y.average_h(j)
-		);
-	}
-
-	inline coor_t scalar_component(const coor_t aij, const coor_t bij, const int i, const int j) {
+	inline coor_t scalar_component(const coor_t aij, const coor_t bij, const size_t i, const size_t j) {
 		return aij * bij * x.average_h(i) * y.average_h(j);
-	}
-
-	inline coor_t scalar(const subarea_t & a, const subarea_t & b) {
-		coor_t s = 0.0;
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				if (is_border(i, j))
-					continue;
-				s += scalar_component(get(a, i, j), get(b, i, j), i, j);
-			}
-		}
-		return s;
-	}
-
-	inline coor_t norm(const subarea_t & a) {
-		return sqrt(scalar(a, a));
 	}
 
 	inline bool is_global_left() {
@@ -342,122 +342,22 @@ private:
 		return y.is_global_max(y.max_idx);
 	}
 
-	inline bool is_border(const int i, const int j) {
+	inline bool is_border(const size_t i, const size_t j) {
 		return x.is_border(i) or y.is_border(j);
 	}
 
-
-
-
-
-
-
-
-
-
-	inline size_t size() {
-		return static_cast<size_t>(x.N * y.N);
+	void send_recv(func_data_t & func_data) {
+		up_neighbor->send_recv(func_data);
+		down_neighbor->send_recv(func_data);
+		left_neighbor->send_recv(func_data);
+		right_neighbor->send_recv(func_data);
 	}
 
-	inline const coor_t & get(const subarea_t & a, const int i, const int j) {
-		return a[x.local(i) * x.N + y.local(j)];
-	}
-
-	inline const coor_t & put(subarea_t & a, const int i, const int j, const coor_t v) {
-		return a[x.local(i) * x.N + y.local(j)] = v;
-	}
-
-	inline const coor_t & put(coor_t a[], const int i, const int j, const coor_t v) {
-		return a[x.local(i) * x.N + y.local(j)] = v;
-	}
-
-	inline const coor_t & get(const coor_t a[], const int i, const int j) {
-		return a[x.local(i) * x.N + y.local(j)];
-	}
-
-
-	inline void init_mpi_requests() {
-		// init request statuses
-		if (neighbor_counter) {
-			delete_statuses();
-			p_responses = new MPI_Request[neighbor_counter];
-			r_responses = new MPI_Request[neighbor_counter];
-			g_responses = new MPI_Request[neighbor_counter];
-			p_requests = new MPI_Request[neighbor_counter];
-			r_requests = new MPI_Request[neighbor_counter];
-			g_requests = new MPI_Request[neighbor_counter];
-		}
-	}
-
-	inline void delete_statuses() {
-		delete[] p_responses;
-		delete[] r_responses;
-		delete[] g_responses;
-		delete[] p_requests;
-		delete[] r_requests;
-		delete[] g_requests;
-	}
-
-
-
-
-
-
-	void send_recv_to(func_tag_t func_tag, action_t send_act, action_t receive_act,
-	                  coor_line_t sent_array, coor_line_t receive_array,
-	                  MPI_Request &request, MPI_Request &response,
-	                  const int idx_count, const int target_rank
-	) {
-		// async send and receive to/from neighbors
-		MPI_Isend(sent_array, idx_count, MPI_DOUBLE, target_rank,
-		          get_tag(send_act, func_tag), MPI_COMM_WORLD, &request);
-		MPI_Irecv(receive_array, idx_count, MPI_DOUBLE, target_rank,
-		          get_tag(receive_act, func_tag), MPI_COMM_WORLD, &response);
-	}
-
-	void send_recv(sent_data_t & sent_data, func_data_t &func_data, func_tag_t func_tag,
-	               MPI_Request * requests, MPI_Request * responses) {
-		int counter = 0;
-		if (not is_global_up()) {
-			send_recv_to(func_tag, SEND_UP, RECEIVE_UP, sent_data.sent_up, func_data.up,
-			             requests[counter], responses[counter], x.idx_count(), rank - x.side_processes_count());
-			++counter;
-		}
-		if (not is_global_down()) {
-			send_recv_to(func_tag, SEND_DOWN, RECEIVE_DOWN, sent_data.sent_down, func_data.down,
-			             requests[counter], responses[counter], x.idx_count(), rank + x.side_processes_count());
-			++counter;
-		}
-		if (not is_global_left()) {
-			send_recv_to(func_tag, SEND_LEFT, RECEIVE_LEFT, sent_data.sent_left, func_data.left,
-			             requests[counter], responses[counter], y.idx_count(), rank - 1);
-			++counter;
-		}
-		if (not is_global_right()) {
-			send_recv_to(func_tag, SEND_RIGHT, RECEIVE_RIGHT, sent_data.sent_right, func_data.right,
-			             requests[counter], responses[counter], y.idx_count(), rank + 1);
-//			++counter;
-		}
-	}
-
-	void wait_async_complete(MPI_Request * responses) {
-		MPI_Status statuses[neighbor_counter];
-		MPI_Waitall(neighbor_counter, responses, statuses);
-	}
-
-	void update_sent_vector(sent_data_t & sent_data, const int i, const int j, const coor_t value) {
-		if (i == x.min_idx and not x.is_global_min(i)) {
-			sent_data.sent_left[j] = value;
-		}
-		if (i == x.max_idx and not x.is_global_max(i)) {
-			sent_data.sent_right[j] = value;
-		}
-		if (j == y.min_idx and not y.is_global_min(j)) {
-			sent_data.sent_up[i] = value;
-		}
-		if (j == y.max_idx and not y.is_global_max(j)) {
-			sent_data.sent_down[i] = value;
-		}
+	void wait(func_data_t & func_data) {
+		up_neighbor->wait(func_data);
+		down_neighbor->wait(func_data);
+		left_neighbor->wait(func_data);
+		right_neighbor->wait(func_data);
 	}
 
 
@@ -467,99 +367,83 @@ public:
 	OneDimensionData y;
 	const coor_t eps;
 	int rank;
-	func_data_t p;
-	func_data_t new_p;
-	sent_data_t sent_p;
-	func_data_t r;
-	func_data_t new_r;
-	sent_data_t sent_r;
-	func_data_t g;
-	func_data_t new_g;
-	sent_data_t sent_g;
-	int neighbor_counter;
-	MPI_Request * p_responses;
-	MPI_Request * r_responses;
-	MPI_Request * g_responses;
-	MPI_Request * p_requests;
-	MPI_Request * r_requests;
-	MPI_Request * g_requests;
+
+	iteration_data_t cur;
+	iteration_data_t next;
+	size_t x_size;
+	size_t y_size;
+	ISendReceive * up_neighbor;
+	ISendReceive * down_neighbor;
+	ISendReceive * left_neighbor;
+	ISendReceive * right_neighbor;
+
+//	func_data_t phi;
+//	func_data_t F;
 
 	LocalProcess(const OneDimensionData & x_data, const OneDimensionData & y_data, const coor_t eps, const int rank):
 			x(x_data), y(y_data), eps(eps), rank(rank),
-			p(x.global_idx_count(), y.global_idx_count()),
-			new_p(x.global_idx_count(), y.global_idx_count()),
-			sent_p(x.global_idx_count(), y.global_idx_count()),
-			r(x.global_idx_count(), y.global_idx_count()),
-			new_r(x.global_idx_count(), y.global_idx_count()),
-			sent_r(x.global_idx_count(), y.global_idx_count()),
-			g(x.global_idx_count(), y.global_idx_count()),
-			new_g(x.global_idx_count(), y.global_idx_count()),
-			sent_g(x.global_idx_count(), y.global_idx_count()),
-			neighbor_counter(0),
-			p_responses(NULL), r_responses(NULL), g_responses(NULL),
-			p_requests(NULL), r_requests(NULL), g_requests(NULL)
+			x_size(static_cast<size_t>(x.N)), y_size(static_cast<size_t>(y.N)),
+			up_neighbor(NULL), down_neighbor(NULL),
+			left_neighbor(NULL), right_neighbor(NULL)
+//			phi(NULL_TAG), F(NULL_TAG)
 	{
-		// compute neighbor counter
-		if (not is_global_right())
-			++neighbor_counter;
-		if (not is_global_left())
-			++neighbor_counter;
 		if (not is_global_up())
-			++neighbor_counter;
+			++x_size;
 		if (not is_global_down())
-			++neighbor_counter;
-		// init 'p'
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				// init local variables
-				if (x.is_border(i) or x.is_border(j)) {
-					calculate_init_broad_p(i, j);
-				} else {
-					calculate_init_internal_p(i, j);
-				}
-				calculate_init_local_g(i, j);
-				// init neighbors variables
-				if (j == y.min_idx and not is_global_up()) {
-					p.up[i] = compute_init_internal_p();
-				}
-				if (j == y.max_idx and not is_global_down()) {
-					p.down[i] = compute_init_internal_p();
-				}
-				if (i == x.min_idx and not is_global_left()) {
-					p.left[j] = compute_init_internal_p();
-				}
-				if (i == x.max_idx and not is_global_right()) {
-					p.right[j] = compute_init_internal_p();
-				}
+			++x_size;
+		if (not is_global_left())
+			++y_size;
+		if (not is_global_right())
+			++y_size;
+
+		if (is_global_up()) {
+			up_neighbor = new SendReceiveEmpty();
+		} else {
+			up_neighbor = new SendReceiveUp(x_size, rank - x.side_processes_count());
+		}
+		if (is_global_down()) {
+			down_neighbor = new SendReceiveEmpty();
+		} else {
+			down_neighbor = new SendReceiveDown(x_size, rank + x.side_processes_count());
+		}
+		if (is_global_left()) {
+			left_neighbor = new SendReceiveEmpty();
+		} else {
+			left_neighbor = new SendReceiveLeft(rank - 1);
+		}
+		if (is_global_right()) {
+			right_neighbor = new SendReceiveEmpty();
+		} else {
+			right_neighbor = new SendReceiveRight(rank + 1);
+		}
+
+		cur.resize(x_size, y_size);
+		next.resize(x_size, y_size);
+
+//		phi.resize(x_size, y_size);
+//		F.resize(x_size, y_size);std::cout << "compute local 'phi' and 'F'" << std::endl;
+//		for (size_t i = 0; i < x_size; ++i) {
+//			for (size_t j = 0; j < y_size; ++j) {
+//
+//			}
+//		}
+
+		if (rank == 0) std::cout << "init 'p'" << std::endl;
+		for (size_t i = 0; i < x_size; ++i) {
+			for (size_t j = 0; j < y_size; ++j) {
+				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : 0;
+//				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : phi(x[i],y[j]);
+//				cur.p(i,j) = is_border(i,j) ? phi(i,j) : 0;
 			}
 		}
+
 		// init 'r' and 'g'
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				// init local variables
-				if (x.is_border(i) or x.is_border(j)) {
-					calculate_init_broad_r(i, j);
-				} else {
-					calculate_init_internal_r(i, j);
-				}
-				calculate_init_local_g(i, j);
-				// init neighbors variables
-				if (j == y.min_idx and not is_global_up()) {
-					r.up[i] = compute_init_internal_r(i, j);
-					g.up[i] = r.up[i];
-				}
-				if (j == y.max_idx and not is_global_down()) {
-					r.down[i] = compute_init_internal_r(i, j);
-					g.down[i] = r.down[i];
-				}
-				if (i == x.min_idx and not is_global_left()) {
-					r.left[j] = compute_init_internal_r(i, j);
-					g.left[j] = r.left[j];
-				}
-				if (i == x.max_idx and not is_global_right()) {
-					r.right[j] = compute_init_internal_r(i, j);
-					g.right[j] = r.right[j];
-				}
+		if (rank == 0) std::cout << "init 'r' and 'g'" << std::endl;
+		for (size_t i = 0; i < x_size; ++i) {
+			for (size_t j = 0; j < y_size; ++j) {
+				cur.r(i,j) = is_border(i,j) ? 0 : - delta_h(cur.p, i, j) - F(x[i], y[j]);
+//				cur.r(i,j) = is_border(i,j) ? 0 : - delta_h(cur.p, i, j) - F(i,j);
+				cur.g(i,j) = cur.r(i,j);
 			}
 		}
 	}
@@ -567,12 +451,10 @@ public:
 	inline coor_t compute_tau() {
 		// compute local numerator and denominator for tau
 		coor_t numerator = 0.0, denominator = 0.0;
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				if (is_border(i, j))
-					continue;
-				numerator += scalar_component(get(r.local, i, j), get(r.local, i, j), i, j);
-				denominator -= scalar_component(delta_h(r, i, j), get(r.local, i, j), i, j);
+		for (size_t i = 1; i < x_size - 1; ++i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+				numerator += cur.r(i,j) * cur.r(i,j) * x.average_h(i) * y.average_h(j);
+				denominator -= delta_h(cur.r,i,j) * cur.r(i,j) * x.average_h(i) * y.average_h(j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -584,44 +466,19 @@ public:
 		return numerator / denominator;
 	}
 
-	inline coor_t compute_pij(const int i, const int j, const coor_t tau) {
-		if (x.is_border(i) or y.is_border(j)) {
-			return get(p.local, i, j);
-		} else {
-			return get(p.local, i, j) - tau * get(r.local, i, j);
-		}
-	}
-
 	void calculate_new_p(const coor_t tau) {
-		int i, j;
-//		coor_t min_coor=0, max_coor=9e99;
-		for (i = x.min_idx; i <= x.max_idx; ++i) {
-			for (j = y.min_idx; j <= y.max_idx; ++j) {
-				coor_t value = compute_pij(i, j, tau);
-//				coor_t v = std::abs(value - phi(x.coor(i), y.coor(j)));
-//				min_coor = v < min_coor ? v : min_coor;
-//				max_coor = v < max_coor ? max_coor : v;
-				put(new_p.local, i, j, value);
-				update_sent_vector(sent_p, i, j, value);
+		for (size_t i = 1; i < x_size - 1; ++i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+				next.p(i,j) = cur.p(i,j) - tau * cur.r(i,j);
 			}
 		}
-//		std::cout << min_coor << "-" << max_coor << std::endl;
-
-	}
-
-	inline coor_t compute_rij(const int i, const int j) {
-		if (x.is_border(i) or y.is_border(j))
-			return 0;
-		else
-			return - delta_h(new_p, i, j) - F(x.coor(i), y.coor(j));
 	}
 
 	inline void calculate_new_r() {
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				coor_t value = compute_rij(i, j);
-				put(new_r.local, i, j, value);
-				update_sent_vector(sent_r, i, j, value);
+		for (size_t i = 1; i < x_size - 1; ++i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+				next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
+//				next.r(i,j) = - delta_h(next.p, i, j) - F(i,j);
 			}
 		}
 	}
@@ -630,37 +487,25 @@ public:
 		// compute local numerator and denominator for tau
 //		double start = MPI_Wtime();
 		coor_t numerator = 0.0, denominator = 0.0;
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				if (is_border(i, j))
-					continue;
-				numerator += scalar_component( - delta_h(new_r, i, j), get(g.local, i, j), i, j);
-				denominator += scalar_component( - delta_h(g, i, j), get(g.local, i, j), i, j);
+		for (size_t i = 1; i < x_size - 1; ++i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+				numerator -= scalar_component(delta_h(next.r, i, j), cur.g(i, j), i, j);
+				denominator -= scalar_component(delta_h(cur.g, i, j), cur.g(i, j), i, j);
 			}
 		}
-//		double end = MPI_Wtime();
-//		std::cout << "allreduce " << end - start << std::endl;
-
 		coor_t send_data[2], receive_data[2];
 		send_data[0] = numerator;
 		send_data[1] = denominator;
 		MPI_Allreduce(send_data, receive_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
 		numerator = receive_data[0];
 		denominator = receive_data[1];
 		return numerator / denominator;
 	}
 
-	inline coor_t compute_gij(const coor_t alpha, const int i, const int j) {
-		return get(new_r.local, i, j) - alpha * get(g.local, i, j);
-	}
-
 	void calculate_new_g(const coor_t alpha) {
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				coor_t value = compute_gij(alpha, i, j);
-				put(new_g.local, i, j, value);
-				update_sent_vector(sent_g, i, j, value);
+		for (size_t i = 0; i < x_size; ++i) {
+			for (size_t j = 0; j < y_size; ++j) {
+				next.g(i,j) = next.r(i,j) - alpha * cur.g(i,j);
 			}
 		}
 	}
@@ -668,14 +513,12 @@ public:
 	std::pair<coor_t,coor_t> compute_difference_and_error() {
 		// compute local difference and error for tau
 		coor_t difference = 0.0, error = 0.0;
-		for (int i = x.min_idx; i <= x.max_idx; ++i) {
-			for (int j = y.min_idx; j <= y.max_idx; ++j) {
-				if (is_border(i, j))
-					continue;
-				coor_t buf1 = get(new_p.local, i, j) - get(p.local, i, j);
-				difference += scalar_component(buf1, buf1, i, j);
-				coor_t buf2 = get(new_p.local, i, j) - solution(x.coor(i), y.coor(j));
-				error += scalar_component(buf2, buf2, i, j);
+		for (size_t i = 1; i < x_size - 1; ++i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+				coor_t buf = next.p(i,j) - cur.p(i,j);
+				difference += scalar_component(buf, buf, i, j);
+				buf = next.p(i,j) - solution(x[i], y[j]);
+				error += scalar_component(buf, buf, i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -688,60 +531,46 @@ public:
 	}
 
 	std::pair<coor_t,coor_t> calculate_iteration() {
-		init_mpi_requests();
-		double start, end;
-		std::cout << "compute tau" << std::endl;
-		start = MPI_Wtime();
+//		double start, end;
+
+//		start = MPI_Wtime();
 		coor_t tau = compute_tau();
-		end = MPI_Wtime();
-		std::cout << end - start << std::endl;
+//		end = MPI_Wtime();
+//		if(rank == 0) std::cout << "computed tau (" << end - start << ")" << std::endl;
 
-		std::cout << "compute p" << std::endl;
-		start = MPI_Wtime();
+//		start = MPI_Wtime();
 		calculate_new_p(tau);
-		end = MPI_Wtime();
-		std::cout << end - start << std::endl;
-//		std::cout << new_p.local.size() << std::endl;
+		send_recv(next.p);
+		wait(next.p);
+//		end = MPI_Wtime();
+//		if (rank == 0) std::cout << "computed p (" << end - start << ")" << std::endl;
 
-//		std::cout << new_p << std::endl;
-//		for (size_t k = 0; k < new_p.local.size(); ++k) {
-////	for (int k = 0; k < 1000 * 1000; ++k) {
-////	for (int k = 0; k < sz; ++k) {
-////		out << func_data.local[k] << ' ';
-////		out << k << ' ';
-//		}
-		// notify about 'p'
-		send_recv(sent_p, new_p, P_TAG, p_requests, p_responses);
-		// wait sync p
-		wait_async_complete(p_responses);
 
-		std::cout << "compute r" << std::endl;
-		start = MPI_Wtime();
+//		start = MPI_Wtime();
 		calculate_new_r();
-		end = MPI_Wtime();
-		std::cout << end - start << std::endl;
+		send_recv(next.r);
+		wait(next.r);
+//		end = MPI_Wtime();
+//		if (rank == 0) std::cout << "computed r (" << end - start  << ")" << std::endl;
 
-// notify about 'r'
-		send_recv(sent_r, new_r, R_TAG, r_requests, r_responses);
-		// wait sync 'r'
-		wait_async_complete(r_responses);
 
-		std::cout << "compute alpha" << std::endl;
-		start = MPI_Wtime();
+//		start = MPI_Wtime();
 		coor_t alpha = compute_alpha();
-		end = MPI_Wtime();
-		std::cout << end - start << std::endl;
+//		end = MPI_Wtime();
+//		if (rank == 0) std::cout << "computed alpha (" << end - start << ")" << std::endl;
 
-		std::cout << "compute g" << std::endl;
-		start = MPI_Wtime();
+//		start = MPI_Wtime();
 		calculate_new_g(alpha);
-		end = MPI_Wtime();
-		std::cout << end - start << std::endl;
-		send_recv(sent_g, new_g, G_TAG, g_requests, g_responses);
-		wait_async_complete(g_responses);
+		send_recv(next.g);
+		wait(next.g);
+//		end = MPI_Wtime();
+//		if (rank == 0) std::cout << "computed g (" << end - start << ")" << std::endl;
 
-		std::cout << "compute difference and error" << std::endl;
-		return compute_difference_and_error();
+//		start = MPI_Wtime();
+		std::pair<coor_t , coor_t > result = compute_difference_and_error();
+//		end = MPI_Wtime();
+//		std::cout << "computed difference and error (" << end - start << ")" << std::endl;
+		return result;
 	}
 
 
@@ -749,21 +578,25 @@ public:
 		const int MAX_ITERATION = 1000;
 		int iteration = 0;
 		for (; iteration < MAX_ITERATION ;++iteration) {
+			double start = MPI_Wtime();
 			std::pair<coor_t, coor_t> result = calculate_iteration();
+			double end = MPI_Wtime();
 			coor_t difference = result.first;
 			coor_t error = result.second;
-			std::cout << iteration << ") " << difference << " " << error << std::endl;
+			std::cout << "[" << iteration << "] " << difference << " " << error
+			          << "(" << end - start << ")" << std::endl;
 			if (difference < eps)
 				break;
-			std::cout << "p == new_p is " << (p == new_p ? "true" : "false") << std::endl;
-			p = new_p;
-			r = new_r;
-			g = new_g;
+//			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
+			cur = next;
 		}
 	}
 
 	~LocalProcess() {
-		delete_statuses();
+		delete[] up_neighbor;
+		delete[] down_neighbor;
+		delete[] left_neighbor;
+		delete[] right_neighbor;
 	}
 
 };
