@@ -130,77 +130,69 @@ enum action_t {
 
 
 struct func_data_t {
-	coor_line_t up;
-	coor_line_t down;
-	coor_line_t left;
-	coor_line_t right;
-	subarea_t local;
+//	coor_line_t up;
+//	coor_line_t down;
+//	coor_line_t left;
+//	coor_line_t right;
+//	subarea_t local;
+	std::vector<coor_t > data;
 	size_t x_idx_count;
 	size_t y_idx_count;
 
 	func_data_t(const size_t x_idx_count, const size_t y_idx_count):
-			up(new coor_t[x_idx_count]),
-			down(new coor_t[x_idx_count]),
-			left(new coor_t[y_idx_count]),
-			right(new coor_t[y_idx_count]),
-			local(x_idx_count * y_idx_count),
+			data(x_idx_count * y_idx_count),
+//			up(new coor_t[x_idx_count]),
+//			down(new coor_t[x_idx_count]),
+//			left(new coor_t[y_idx_count]),
+//			right(new coor_t[y_idx_count]),
+//			local(x_idx_count * y_idx_count),
 			x_idx_count(x_idx_count),
 			y_idx_count(y_idx_count)
 	{}
 
-	func_data_t & operator=(const func_data_t & another) {
-		for (size_t i = 0; i < x_idx_count; ++i) {
-			up[i] = another.up[i];
-			down[i] = another.down[i];
-		}
-		for (size_t j = 0; j < y_idx_count; ++j) {
-			left[j] = another.left[j];
-			right[j] = another.right[j];
-		}
-		local = another.local;
-		x_idx_count = another.x_idx_count;
-		y_idx_count = another.y_idx_count;
-		return *this;
+	const coor_t & operator()(const int i, const int j) const {
+		return data[i + j * x_idx_count];
 	}
 
+	coor_t & operator()(const int i, const int j) {
+		return data[i + j * x_idx_count];
+	}
+
+//	func_data_t & operator=(const func_data_t & another) {
+//		for (size_t i = 0; i < x_idx_count; ++i) {
+//			up[i] = another.up[i];
+//			down[i] = another.down[i];
+//		}
+//		for (size_t j = 0; j < y_idx_count; ++j) {
+//			left[j] = another.left[j];
+//			right[j] = another.right[j];
+//		}
+//		local = another.local;
+//		x_idx_count = another.x_idx_count;
+//		y_idx_count = another.y_idx_count;
+//		return *this;
+//	}
+
 	bool operator==(const func_data_t & another) {
-		for (size_t i = 0; i < x_idx_count; ++i) {
-			if (up[i] != another.up[i] or down[i] != another.down[i]) {
-				return false;
-			}
-		}
-		for (size_t j = 0; j < y_idx_count; ++j) {
-			if (left[j] != another.left[j] or right[j] != another.right[j]) {
-				return false;
-			}
-		}
-		return local == another.local
+		return data == another.data
 		       and x_idx_count == another.x_idx_count
 		       and y_idx_count == another.y_idx_count;
 	}
-
-	~func_data_t() {
-		delete[] up;
-		delete[] down;
-		delete[] left;
-		delete[] right;
-	}
-
 };
 
 
-std::ostream & operator<<(std::ostream & out, const func_data_t & func_data) {
-//	int sz = func_data.local.size();
-//	int sz = 1000 * 1000;
-//	std::cout << sz << std::endl;
-	for (size_t k = 0; k < func_data.local.size(); ++k) {
-//	for (int k = 0; k < 1000 * 1000; ++k) {
-//	for (int k = 0; k < sz; ++k) {
-//		out << func_data.local[k] << ' ';
-//		out << k << ' ';
-	}
-	return out;
-}
+//std::ostream & operator<<(std::ostream & out, const func_data_t & func_data) {
+////	int sz = func_data.local.size();
+////	int sz = 1000 * 1000;
+////	std::cout << sz << std::endl;
+//	for (size_t k = 0; k < func_data.local.size(); ++k) {
+////	for (int k = 0; k < 1000 * 1000; ++k) {
+////	for (int k = 0; k < sz; ++k) {
+////		out << func_data.local[k] << ' ';
+////		out << k << ' ';
+//	}
+//	return out;
+//}
 
 
 struct sent_data_t {
@@ -844,8 +836,8 @@ int main(int argc, char * argv[]) {
 	std::cout << "rank " << rank << std::endl;
 	std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
 	std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
-	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3 / 2, x_range.first, x_range.second);
-	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3 / 2, y_range.first, y_range.second);
+	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3.0 / 2, x_range.first, x_range.second);
+	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3.0 / 2, y_range.first, y_range.second);
 
 	std::cout << "init process" << std::endl;
 	LocalProcess process(x_data, y_data, 0.0001, rank);
