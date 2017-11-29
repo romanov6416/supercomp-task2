@@ -65,6 +65,7 @@ class ISendReceive {
 public:
 	virtual void send_recv(func_data_t & func_data) = 0;
 	virtual void wait(func_data_t & func_data) = 0;
+	virtual ~ISendReceive() {};
 };
 
 
@@ -453,8 +454,8 @@ public:
 		coor_t numerator = 0.0, denominator = 0.0;
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
-				numerator += cur.r(i,j) * cur.r(i,j) * x.average_h(i) * y.average_h(j);
-				denominator -= delta_h(cur.r,i,j) * cur.r(i,j) * x.average_h(i) * y.average_h(j);
+				numerator += scalar_component(cur.r(i,j), cur.r(i,j), i, j);
+				denominator -= scalar_component(delta_h(cur.r,i,j) , cur.r(i,j), i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -593,10 +594,10 @@ public:
 	}
 
 	~LocalProcess() {
-		delete[] up_neighbor;
-		delete[] down_neighbor;
-		delete[] left_neighbor;
-		delete[] right_neighbor;
+		delete up_neighbor;
+		delete down_neighbor;
+		delete left_neighbor;
+		delete right_neighbor;
 	}
 
 };
