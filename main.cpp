@@ -58,7 +58,28 @@ struct func_data_t {
 	bool operator==(const func_data_t & another) {
 		return data == another.data;
 	}
+
+	func_data_t operator-(const func_data_t & other) const {
+		func_data_t tmp(tag);
+		tmp.data.resize(data.size());
+		for (size_t i = 0; i < data.size(); ++i) {
+			tmp.data[i].resize(data[i].size());
+			for (size_t j = 0; j < data[i].size(); ++j) {
+				tmp.data[i][j] = data[i][j] - other.data[i][j];
+			}
+		}
+		return tmp;
+	}
 };
+
+std::ostream & operator<<(std::ostream & out, func_data_t & func_data) {
+	for (size_t i = 0; i < func_data.size_x(); ++i) {
+		for (size_t j = 0; j < func_data.size_y(); ++j) {
+			out << func_data(i,j) << ' ';
+		}
+	}
+	return out;
+}
 
 
 class ISendReceive {
@@ -208,6 +229,7 @@ inline coor_t F(const coor_t x, const coor_t y) {
 
 inline coor_t phi(const coor_t x, const coor_t y) {
 	return exp(1 - (x + y) * (x + y));
+//	return 1 + sin(x*y);
 }
 
 inline coor_t solution(const coor_t x, const coor_t y) {
@@ -421,19 +443,11 @@ public:
 		cur.resize(x_size, y_size);
 		next.resize(x_size, y_size);
 
-//		phi.resize(x_size, y_size);
-//		F.resize(x_size, y_size);std::cout << "compute local 'phi' and 'F'" << std::endl;
-//		for (size_t i = 0; i < x_size; ++i) {
-//			for (size_t j = 0; j < y_size; ++j) {
-//
-//			}
-//		}
-
 		if (rank == 0) std::cout << "init 'p'" << std::endl;
 		for (size_t i = 0; i < x_size; ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
-				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : 0;
-//				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : phi(x[i],y[j]);
+//				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : 0;
+				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : phi(x[i],y[j]);
 //				cur.p(i,j) = is_border(i,j) ? phi(i,j) : 0;
 			}
 		}
@@ -538,7 +552,6 @@ public:
 		coor_t tau = compute_tau();
 //		end = MPI_Wtime();
 //		if(rank == 0) std::cout << "computed tau (" << end - start << ")" << std::endl;
-
 //		start = MPI_Wtime();
 		calculate_new_p(tau);
 		send_recv(next.p);
@@ -589,6 +602,10 @@ public:
 			if (difference < eps)
 				break;
 //			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
+			std::cout << "cur  p " << cur.p << std::endl;
+			std::cout << "next p " << next.p << std::endl;
+//			std::cout << "r " << next.r << std::endl;
+//			std::cout << "g " << next.g << std::endl;
 			cur = next;
 		}
 	}
@@ -644,7 +661,7 @@ int main(int argc, char * argv[]) {
 
 
 
-	const int N = 1000;
+	const int N = 3;
 
 
 	// compute process on X and Y axes
