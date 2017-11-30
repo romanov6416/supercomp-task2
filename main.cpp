@@ -73,12 +73,21 @@ struct func_data_t {
 };
 
 std::ostream & operator<<(std::ostream & out, func_data_t & func_data) {
-	for (size_t i = 0; i < func_data.size_x(); ++i) {
-		for (size_t j = 0; j < func_data.size_y(); ++j) {
+	for (size_t j = 0; j < func_data.size_y(); ++j) {
+		for (size_t i = 0; i < func_data.size_x(); ++i) {
 			out << func_data(i,j) << ' ';
 		}
 		out << std::endl;
 	}
+	return out;
+}
+
+
+std::ostream & operator<<(std::ostream & out, std::vector<coor_t> & v) {
+	for (size_t j = 0; j < v.size(); ++j) {
+		out << v[j] << ' ';
+	}
+	out << std::endl;
 	return out;
 }
 
@@ -140,16 +149,22 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
+//		int r;
+//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		for (size_t i = 0; i < sent_data.size(); ++i)
 			sent_data[i] = func_data(i,1);
+//		if (rank() == 0) std::cerr << r << "->" << rank() << "send" << std::endl << sent_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
 	}
 
 	virtual void wait(func_data_t & func_data) {
+//		int r;
+//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		MPI_Status status;
-		MPI_Wait(&request, &status);
+		MPI_Wait(&response, &status);
 		for (size_t i = 0; i < receive_data.size(); ++i)
 			func_data(i,0) = receive_data[i];
+//		if (rank() == 0) std::cerr << r << "->" << rank() << "receive" << std::endl << receive_data << std::endl;
 	}
 };
 
@@ -165,16 +180,22 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
+//		int r;
+//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		for (size_t j = 0; j < sent_data.size(); ++j)
 			sent_data[j] = func_data(j, func_data.size_y() - 2);
+//		if (rank() == 2) std::cerr << r << "->" << rank() << "send" << std::endl << sent_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
 	}
 
 	virtual void wait(func_data_t & func_data) {
+//		int r;
+//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		MPI_Status status;
-		MPI_Wait(&request, &status);
+		MPI_Wait(&response, &status);
 		for (size_t i = 0; i < receive_data.size(); ++i)
 			func_data(i, func_data.size_y() - 1) = receive_data[i];
+//		if (rank() == 2) std::cerr << r << "->" << rank() << "receive" << std::endl << receive_data << std::endl;
 	}
 };
 
@@ -193,7 +214,7 @@ public:
 
 	virtual void wait(func_data_t &) {
 		MPI_Status status;
-		MPI_Wait(&request, &status);
+		MPI_Wait(&response, &status);
 	}
 };
 
@@ -206,6 +227,7 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
+//		if (rank() == 1) std::cerr << "send right" << std::endl << func_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_y(),
 		                  &func_data(func_data.size_x() - 2,0),
 		                  &func_data(func_data.size_x() - 1,0));
@@ -213,7 +235,8 @@ public:
 
 	virtual void wait(func_data_t &) {
 		MPI_Status status;
-		MPI_Wait(&request, &status);
+		MPI_Wait(&response, &status);
+//		if (rank() == 1) std::cerr << "receive from right" << std::endl << func_data << std::endl;
 	}
 };
 
@@ -388,6 +411,7 @@ private:
 		coor_t l = (a(i,j) - a(i-1,j)) / x.h(i-1)   -   (a(i+1,j) - a(i,j)) / x.h(i);// / average_hi;
 		coor_t r = (a(i,j) - a(i,j-1)) / y.h(j-1)   -   (a(i,j+1) - a(i,j)) / y.h(j);// ) / average_hj;
 		return - (l / x.average_h(i) + r / y.average_h(j));
+//		return (l / x.average_h(i) + r / y.average_h(j));
 	}
 
 	inline coor_t scalar_component(const coor_t aij, const coor_t bij, const size_t i, const size_t j) {
@@ -535,6 +559,10 @@ public:
 //				cur.p(i,ext_j) = is_global_border(i,ext_j) ? phi(i,ext_j) : 0;
 			}
 		}
+//		std::cout << x_size << " " << y_size << std::endl;
+//		std::cout << next.p;
+//		std::cout << "next.p(0,0) = " << next.p(0,0) << std::endl;
+
 		// init 'r' and 'g'
 		if (rank == 0) std::cout << "init local 'r' and 'g'" << std::endl;
 		for (size_t i = 0; i < x_size; ++i) {
@@ -547,17 +575,30 @@ public:
 					// it will be inited after
 					continue;
 				} else {
+//					next.r(i,j) = delta_h(next.p, i, j) - F(x[i], y[j]);
 					next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
 				}
 				next.g(i,j) = next.r(i,j);
 			}
 		}
 
+//		if (rank == 1) std::cerr << rank << ") " << next.r << std::endl;
+
 		if (rank == 0) std::cout << "sync neighbor 'r' and 'g'" << std::endl;
+
+//		if (rank == 0) std::cerr << "send r" << std::endl;
 		send_recv(next.r);
-		send_recv(next.g);
 		wait(next.r);
+//		if (rank == 0) std::cerr << "send g" << std::endl;
+		send_recv(next.g);
 		wait(next.g);
+
+//		if (rank == 0) std::cerr << rank << ") " << next.r << std::endl;
+
+//		std::cerr << delta_h(next.p, 3, 4) << std::endl;
+//		std::cerr << next.g;
+//		std::cerr << F(x[3], y[4]);
+//		throw 2;
 
 //		std::cout << "ok" << std::endl;
 		cur = next;
@@ -574,12 +615,18 @@ public:
 				denominator -= scalar_component(delta_h(cur.r,i,j) , cur.r(i,j), i, j);
 			}
 		}
+//		if (rank == 0) {
+//			std::cout << rank << " | " << numerator << " / " << denominator << std::endl;
+//		}
+//
 		coor_t send_data[2], receive_data[2];
 		send_data[0] = numerator;
 		send_data[1] = denominator;
 		MPI_Allreduce(send_data, receive_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 		numerator = receive_data[0];
 		denominator = receive_data[1];
+//		if (rank == 0) std::cerr << "result " << numerator << ' ' << denominator << std::endl;
+//		std::cerr << rank << ") " << cur.r << std::endl;
 		return numerator / denominator;
 	}
 
@@ -601,6 +648,7 @@ public:
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
+//				next.r(i,j) = delta_h(next.p, i, j) - F(x[i], y[j]);
 //				next.r(i,j) = - delta_h(next.p, i, j) - F(i,j);
 			}
 		}
@@ -682,7 +730,10 @@ public:
 //		if (rank == 0) std::cout << "computed alpha (" << end - start << ")" << std::endl;
 
 //		start = MPI_Wtime();
+//		if (rank == 0) std::cerr << next.g;
 		calculate_new_g(alpha);
+//		if (rank == 0) std::cerr << next.g;
+//		throw 2;
 		send_recv(next.g);
 		wait(next.g);
 //		end = MPI_Wtime();
@@ -690,6 +741,13 @@ public:
 
 //		start = MPI_Wtime();
 		std::pair<coor_t , coor_t > result = compute_difference_and_error();
+
+//		if (rank == 0) {
+//			std::cout << "tau = " << tau << std::endl;
+//			std::cout << "alpha = " << alpha << std::endl;
+//		}
+//		throw 2;
+
 //		end = MPI_Wtime();
 //		std::cout << "computed difference and error (" << end - start << ")" << std::endl;
 		return result;
@@ -709,9 +767,16 @@ public:
 			error = result.second;
 			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " " << error
 			                         << "(" << end - start << ")" << std::endl;
-			if (rank == 0) {
-				iteration = MAX_ITERATION;
-				std::ofstream f("1_iter_c++.txt");
+			if (rank == 2) {
+//				if (iteration == 0) std::cerr << next.p;
+//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
+//				if (iteration == 0) std::cerr << next.r;
+//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
+//				if (iteration == 0) std::cerr << next.g;
+//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
+//				std::cerr << next.p;
+//				iteration = MAX_ITERATION;
+//				std::ofstream f("1_iter_c++.txt");
 //				std::cout << "next p" << std::endl;
 //				std::cout << next.p;
 //				std::cout << "cur p" << std::endl;
@@ -719,14 +784,16 @@ public:
 //				std::cout << "phi" << std::endl;
 //				std::cout << computed_solution;
 //				std::cout << "next p" << std::endl;
-				f << next.p;
+//				f << next.p;
 //				std::cout << "cur p" << std::endl;
-				f << cur.p;
+//				f << cur.p;
 //				std::cout << "phi" << std::endl;
-				f << computed_solution;
-				f.close();
+//				f << computed_solution;
+//				f.close();
 			}
-			std::cout << "-----------------------------" << std::endl;
+//			iteration = MAX_ITERATION;
+
+//			std::cout << "-----------------------------" << std::endl;
 			cur = next;
 //			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
 //			std::cout << "cur  p = " << cur.p << std::endl;
@@ -783,6 +850,35 @@ inline std::pair<int, int> compute_subfield_size(
 
 
 
+//inline std::pair<int, int>
+//compute_subfield_size_x(const int rank, const int processes_on_x, const int processes_on_y) {
+//	const int local_rank = rank % processes_on_x;
+//};
+
+
+inline std::pair<int, int>
+compute_subfield_size_y(const int rank, const int processes_on_x, const int processes_on_y, const int index_count) {
+	int max_idx, min_idx;
+	const int local_rank = rank / processes_on_x;
+	int small_index_count = index_count / processes_on_y;
+	int big_index_count = small_index_count + 1;
+	int dif = index_count;
+	int cur_rank = processes_on_y - 1;
+	while (dif % small_index_count != 0 and cur_rank != local_rank) {
+		--cur_rank;
+		dif -= big_index_count;
+	}
+	if (dif % small_index_count == 0) {
+		min_idx = local_rank * small_index_count;
+		max_idx = min_idx + small_index_count - 1;
+	} else {
+		max_idx = dif - 1;
+		min_idx = big_index_count;
+	}
+	return std::make_pair(min_idx, max_idx);
+};
+
+
 int main(int argc, char * argv[]) {
 	int process_count, rank;
 
@@ -794,7 +890,9 @@ int main(int argc, char * argv[]) {
 
 
 
-	const int N = 7;
+//	const int N = 6;
+//	const int N = 1000;
+	const int N = 2000;
 
 
 	// compute process on X and Y axes
@@ -817,19 +915,26 @@ int main(int argc, char * argv[]) {
 //	std::cout << "hear" << std::endl;
 //	for (int i = 0; i < process_count; ++i) {
 //		rank = i;
-	std::cout << "rank " << rank << std::endl;
+//	std::cout << "rank " << rank << std::endl;
 	std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
 	std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
+//	std::pair<int, int> y_range = compute_subfield_size_y(rank, a, b, N);
 	x_range.first -= static_cast<int>(x_range.first > 0);
 	x_range.second += static_cast<int>(x_range.second < N - 1);
 	y_range.first -= static_cast<int>(y_range.first > 0);
-	y_range.second -= static_cast<int>(y_range.second < N - 1);
-
+	y_range.second += static_cast<int>(y_range.second < N - 1);
+	std::cout << rank << ' '
+	          << "x_range = [" << x_range.first << ":" << x_range.second << "] "
+	          << "y_range = [" << y_range.first << ":" << y_range.second << "]"
+	          << std::endl;
 //	std::cout << rank << ' ' << y_range.second << std::endl;
 //	throw 2;
 
-	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3.0 / 2, x_range.first, x_range.second, a);
-	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3.0 / 2, y_range.first, y_range.second, b);
+//	const double q = 1.0;
+	const double q = 3.0 / 2;
+	// TODO: change q from 1 to (3.0 / 2)
+	OneDimensionData x_data = OneDimensionData(N, 0, 2, q, x_range.first, x_range.second, a);
+	OneDimensionData y_data = OneDimensionData(N, 0, 2, q, y_range.first, y_range.second, b);
 
 	if(rank == 0) std::cout << "init process" << std::endl;
 	LocalProcess process(x_data, y_data, 0.0001, rank);
@@ -841,7 +946,6 @@ int main(int argc, char * argv[]) {
 	          << " y " << y_data.min_idx << ':' << y_data.max_idx
 	          << "=" << y_data.idx_count() << std::endl;
 //	}
-
 	MPI_Finalize();
 	return 0;
 }
