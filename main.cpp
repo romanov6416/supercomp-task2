@@ -86,6 +86,7 @@ class ISendReceive {
 public:
 	virtual void send_recv(func_data_t & func_data) = 0;
 	virtual void wait(func_data_t & func_data) = 0;
+	virtual int rank() = 0;
 	virtual ~ISendReceive() {};
 };
 
@@ -113,6 +114,9 @@ public:
 		          get_tag(receive_dir, func_tag), MPI_COMM_WORLD, &response);
 	}
 
+	virtual int rank() {
+		return target_rank;
+	}
 };
 
 
@@ -120,6 +124,7 @@ class SendReceiveEmpty: public ISendReceive {
 public:
 	virtual void send_recv(func_data_t & ) {}
 	virtual void wait(func_data_t &) {}
+	virtual int rank() { return -1; }
 };
 
 
@@ -246,10 +251,12 @@ public:
 	const size_t min_idx;
 	const size_t max_idx;
 	std::vector<coor_t> line;
+	const int side_proc_count;
 
 	OneDimensionData(const int N, const coor_t A, const coor_t B, const coor_t q,
-	                 const size_t min_local_idx, const size_t max_local_idx) :
-			N(N), A(A), B(B), q(q), min_idx(min_local_idx), max_idx(max_local_idx), line(N)
+	                 const size_t min_local_idx, const size_t max_local_idx, const int side_proc_count) :
+			N(N), A(A), B(B), q(q), min_idx(min_local_idx), max_idx(max_local_idx),
+			line(N), side_proc_count(side_proc_count)
 	{
 		for (int i = 0; i < N; ++i) {
 			line[i] = _coor(static_cast<size_t>(i));
@@ -278,19 +285,31 @@ public:
 	}
 
 	inline bool is_global_max(const size_t local_idx) {
-		return global(local_idx) == static_cast< size_t >(N - 1);
+		return global(local_idx) == static_cast< size_t >(N) - 1;
 	}
 
 	inline bool is_global_min(const size_t local_idx) {
 		return global(local_idx) == 0;
 	}
 
-	inline bool is_border(const size_t local_idx) {
+	inline bool is_global_border(const size_t local_idx) {
 		return is_global_min(local_idx) or is_global_max(local_idx);
 	}
 
-	inline size_t local(const int global_idx) {
+	inline size_t local(const size_t global_idx) {
 		return global_idx - min_idx;
+	}
+
+	inline bool is_local_min(const size_t local_idx) {
+		return local_idx == 0;
+	}
+
+	inline bool is_local_max(const size_t local_idx) {
+		return local_idx == max_idx - min_idx;
+	}
+
+	inline bool is_local_border(const size_t local_idx) {
+		return is_local_min(local_idx) or is_local_max(local_idx);
 	}
 
 	inline size_t idx_count() {
@@ -298,7 +317,7 @@ public:
 	}
 
 	inline int side_processes_count() {
-		return static_cast<int>(round(static_cast<double>(N) / idx_count()));
+		return side_proc_count;
 	}
 
 	inline size_t global_idx_count() {
@@ -313,6 +332,31 @@ public:
 	coor_t operator[](const size_t i) {
 		return coor(static_cast<int>(i));
 	}
+
+	inline bool is_max() {
+		return max_idx == static_cast< size_t >(N) - 1;
+	}
+
+	inline bool is_min() {
+		return min_idx == 0;
+	}
+
+	inline size_t local_min() {
+		return static_cast<size_t>(is_min());
+	}
+
+	inline size_t local_max() {
+		return static_cast<size_t>(is_max());
+	}
+
+	size_t from_ext(const size_t ext_idx) {
+		if (not is_min())
+			return ext_idx + 1;
+	}
+
+//	bool is_external(const size_t local_idx) {
+//		return
+//	}
 };
 
 
@@ -350,24 +394,41 @@ private:
 	}
 
 	inline bool is_global_left() {
-		return x.is_global_min(x.min_idx);
+//		return x.is_global_min(x.local(x.min_idx));
+		return x.is_min();
 	}
 
 	inline bool is_global_right() {
-		return x.is_global_max(x.max_idx);
+		return x.is_max();
+//		return x.is_global_max(x.local(x.max_idx));
 	}
 
 	inline bool is_global_up() {
-		return y.is_global_min(y.min_idx);
+		return y.is_min();
+//		return y.is_global_min(y.local(y.min_idx));
 	}
 
 	inline bool is_global_down() {
-		return y.is_global_max(y.max_idx);
+//		return y.is_global_max(y.local(y.max_idx));
+		return y.is_max();
 	}
 
-	inline bool is_border(const size_t i, const size_t j) {
-		return x.is_border(i) or y.is_border(j);
+	inline bool is_global_border(const size_t i, const size_t j) {
+		return x.is_global_border(i) or y.is_global_border(j);
 	}
+
+	inline bool is_local_border(const size_t i, const size_t j) {
+		// local border of extend area
+		return x.is_local_border(i) or y.is_local_border(j);
+	}
+
+//	inline bool is_external(const size_t i, const size_t j) {
+//		return is
+//	}
+
+//	inline size_t to_local_idx(const size_t i, const size_t j) {
+//
+//	}
 
 	void send_recv(func_data_t & func_data) {
 		up_neighbor->send_recv(func_data);
@@ -405,19 +466,29 @@ public:
 
 	LocalProcess(const OneDimensionData & x_data, const OneDimensionData & y_data, const coor_t eps, const int rank):
 			x(x_data), y(y_data), eps(eps), rank(rank),
-			x_size(static_cast<size_t>(x.N)), y_size(static_cast<size_t>(y.N)),
+			x_size(x.idx_count()), y_size(y.idx_count()),
 			up_neighbor(NULL), down_neighbor(NULL),
 			left_neighbor(NULL), right_neighbor(NULL)
 //			phi(NULL_TAG), F(NULL_TAG)
 	{
-		if (not is_global_up())
-			++x_size;
-		if (not is_global_down())
-			++x_size;
-		if (not is_global_left())
-			++y_size;
-		if (not is_global_right())
-			++y_size;
+//		if (not is_global_up())
+//			++y_size;
+//		if (not is_global_down())
+//			++y_size;
+//		if (not is_global_left())
+//			++x_size;
+//		if (not is_global_right())
+//			++x_size;
+//		std::cout << rank
+//		          << ' ' << is_global_up() << ' ' << is_global_down()
+//		          << ' ' << is_global_left() << ' ' << is_global_right()
+//		          << std::endl;
+//		std::cout << rank << ' ' << x_size << ' ' << y_size
+//		          << ' ' << x.min_idx << ":" << x.max_idx
+//		          << ' ' << x.min_idx << ":" << x.max_idx
+//		          << std::endl;
+//
+//		throw 2;
 
 		if (is_global_up()) {
 			up_neighbor = new SendReceiveEmpty();
@@ -440,31 +511,54 @@ public:
 			right_neighbor = new SendReceiveRight(rank + 1);
 		}
 
+//		std::cout << rank
+//		          << " up=" << up_neighbor->rank() << " down=" << down_neighbor->rank()
+//		          << " left=" << left_neighbor->rank() << " right=" << right_neighbor->rank()
+//		          << std::endl;
+
 		cur.resize(x_size, y_size);
 		next.resize(x_size, y_size);
 
-		if (rank == 0) std::cout << "init 'p'" << std::endl;
+		if (rank == 0) std::cout << "init local and neighbor 'p'" << std::endl;
 		for (size_t i = 0; i < x_size; ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
-//				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : 0;
-				cur.p(i,j) = is_border(i,j) ? phi(x[i],y[j]) : phi(x[i],y[j]);
-//				cur.p(i,j) = is_border(i,j) ? phi(i,j) : 0;
+				next.p(i,j) = is_global_border(i,j) ? phi(x[i],y[j]) : 0;
+//				cur.p(i,ext_j) = is_global_border(i,ext_j) ? phi(x[i],y[ext_j]) : phi(x[i],y[ext_j]);
+//				cur.p(i,ext_j) = is_global_border(i,ext_j) ? phi(i,ext_j) : 0;
+			}
+		}
+		// init 'r' and 'g'
+		if (rank == 0) std::cout << "init local 'r' and 'g'" << std::endl;
+		for (size_t i = 0; i < x_size; ++i) {
+			for (size_t j = 0; j < y_size; ++j) {
+//				if(rank == 0) std::cout << i << ' ' << j << ' ' << is_local_border(i, j) << std::endl;
+				if (is_global_border(i,j)) {
+					next.r(i,j) = 0;
+				} else if (is_local_border(i,j)) {
+					// local not global border point (i,j) always belongs to neighbor
+					// it will be inited after
+					continue;
+				} else {
+					next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
+				}
+				next.g(i,j) = next.r(i,j);
 			}
 		}
 
-		// init 'r' and 'g'
-		if (rank == 0) std::cout << "init 'r' and 'g'" << std::endl;
-		for (size_t i = 0; i < x_size; ++i) {
-			for (size_t j = 0; j < y_size; ++j) {
-				cur.r(i,j) = is_border(i,j) ? 0 : - delta_h(cur.p, i, j) - F(x[i], y[j]);
-//				cur.r(i,j) = is_border(i,j) ? 0 : - delta_h(cur.p, i, j) - F(i,j);
-				cur.g(i,j) = cur.r(i,j);
-			}
-		}
+		if (rank == 0) std::cout << "sync neighbor 'r' and 'g'" << std::endl;
+		send_recv(next.r);
+		send_recv(next.g);
+		wait(next.r);
+		wait(next.g);
+
+//		std::cout << "ok" << std::endl;
+		cur = next;
 	}
 
 	inline coor_t compute_tau() {
 		// compute local numerator and denominator for tau
+		// scalar is computed for internal points of global area
+		// process local computes scalar for local area points (not neighbor points)
 		coor_t numerator = 0.0, denominator = 0.0;
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
@@ -482,6 +576,9 @@ public:
 	}
 
 	void calculate_new_p(const coor_t tau) {
+		// process local computes next 'p' for local area points (not neighbor points)
+		// global border points is not change
+		// neighbor points will be synced after
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.p(i,j) = cur.p(i,j) - tau * cur.r(i,j);
@@ -490,6 +587,9 @@ public:
 	}
 
 	inline void calculate_new_r() {
+		// process local computes next 'r' for local area points (not neighbor points)
+		// global border points is not change
+		// neighbor points will be synced after
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
@@ -589,7 +689,7 @@ public:
 
 
 	void launch() {
-		const int MAX_ITERATION = 1000;
+		const int MAX_ITERATION = 10000;
 		int iteration = 0;
 		for (; iteration < MAX_ITERATION ;++iteration) {
 			double start = MPI_Wtime();
@@ -597,13 +697,20 @@ public:
 			double end = MPI_Wtime();
 			coor_t difference = result.first;
 			coor_t error = result.second;
-			std::cout << "[" << iteration << "] " << difference << " " << error
-			          << "(" << end - start << ")" << std::endl;
+			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " " << error
+			                         << "(" << end - start << ")" << std::endl;
 			if (difference < eps)
 				break;
 //			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
-			std::cout << "cur  p " << cur.p << std::endl;
-			std::cout << "next p " << next.p << std::endl;
+//			std::cout << "cur  p = " << cur.p << std::endl;
+//			std::cout << "next p = " << next.p << std::endl;
+//			std::cout << "phi    = ";
+//			for (int i = 0; i < x.N; ++i) {
+//				for (int j = 0; j < y.N; ++j) {
+//					std::cout << phi(x[i], y[j]) << ' ';
+//				}
+//			}
+//			std::cout << std::endl;
 //			std::cout << "r " << next.r << std::endl;
 //			std::cout << "g " << next.g << std::endl;
 			cur = next;
@@ -661,7 +768,7 @@ int main(int argc, char * argv[]) {
 
 
 
-	const int N = 3;
+	const int N = 1000;
 
 
 	// compute process on X and Y axes
@@ -669,7 +776,7 @@ int main(int argc, char * argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 //	process_count = 12;
 
-	std::cout << "process_count = " << process_count << std::endl;
+	if (rank == 0) std::cout << "process_count = " << process_count << std::endl;
 
 	int a = static_cast<int>(sqrt(process_count));
 //	for (; process_count % a > 0; --a)
@@ -687,12 +794,20 @@ int main(int argc, char * argv[]) {
 	std::cout << "rank " << rank << std::endl;
 	std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
 	std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
-	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3.0 / 2, x_range.first, x_range.second);
-	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3.0 / 2, y_range.first, y_range.second);
+	x_range.first -= static_cast<int>(x_range.first > 0);
+	x_range.second += static_cast<int>(x_range.second < N - 1);
+	y_range.first -= static_cast<int>(y_range.first > 0);
+	y_range.second -= static_cast<int>(y_range.second < N - 1);
 
-	std::cout << "init process" << std::endl;
+//	std::cout << rank << ' ' << y_range.second << std::endl;
+//	throw 2;
+
+	OneDimensionData x_data = OneDimensionData(N, 0, 2, 3.0 / 2, x_range.first, x_range.second, a);
+	OneDimensionData y_data = OneDimensionData(N, 0, 2, 3.0 / 2, y_range.first, y_range.second, b);
+
+	if(rank == 0) std::cout << "init process" << std::endl;
 	LocalProcess process(x_data, y_data, 0.0001, rank);
-	std::cout << "launch" << std::endl;
+	if (rank == 0) std::cout << "launch" << std::endl;
 	process.launch();
 //
 	std::cout << rank << " x " << x_data.min_idx << '-' << x_data.max_idx
