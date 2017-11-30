@@ -4,6 +4,7 @@
 #include <vector>
 #include <utility>
 #include <fstream>
+#include <cstdlib>
 
 
 typedef double coor_t;
@@ -19,6 +20,7 @@ enum action_t {
 	RECEIVE_LEFT=SEND_RIGHT, RECEIVE_RIGHT=SEND_LEFT
 };
 
+bool concurrency_enabled;
 
 inline int get_tag(action_t act, func_tag_t v) {
 	return act + (v << 2);
@@ -75,9 +77,9 @@ struct func_data_t {
 std::ostream & operator<<(std::ostream & out, func_data_t & func_data) {
 	for (size_t j = 0; j < func_data.size_y(); ++j) {
 		for (size_t i = 0; i < func_data.size_x(); ++i) {
-			out << func_data(i,j) << ' ';
+			out << i << ' ' << j << ' ' << func_data(i,j) << std::endl;
 		}
-		out << std::endl;
+//		out << std::endl;
 	}
 	return out;
 }
@@ -149,22 +151,16 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
-//		int r;
-//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		for (size_t i = 0; i < sent_data.size(); ++i)
 			sent_data[i] = func_data(i,1);
-//		if (rank() == 0) std::cerr << r << "->" << rank() << "send" << std::endl << sent_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
 	}
 
 	virtual void wait(func_data_t & func_data) {
-//		int r;
-//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		MPI_Status status;
 		MPI_Wait(&response, &status);
 		for (size_t i = 0; i < receive_data.size(); ++i)
 			func_data(i,0) = receive_data[i];
-//		if (rank() == 0) std::cerr << r << "->" << rank() << "receive" << std::endl << receive_data << std::endl;
 	}
 };
 
@@ -180,22 +176,16 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
-//		int r;
-//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		for (size_t j = 0; j < sent_data.size(); ++j)
 			sent_data[j] = func_data(j, func_data.size_y() - 2);
-//		if (rank() == 2) std::cerr << r << "->" << rank() << "send" << std::endl << sent_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_x(), &sent_data[0], &receive_data[0]);
 	}
 
 	virtual void wait(func_data_t & func_data) {
-//		int r;
-//		MPI_Comm_rank(MPI_COMM_WORLD, &r);
 		MPI_Status status;
 		MPI_Wait(&response, &status);
 		for (size_t i = 0; i < receive_data.size(); ++i)
 			func_data(i, func_data.size_y() - 1) = receive_data[i];
-//		if (rank() == 2) std::cerr << r << "->" << rank() << "receive" << std::endl << receive_data << std::endl;
 	}
 };
 
@@ -227,7 +217,6 @@ public:
 	{}
 
 	virtual void send_recv(func_data_t & func_data) {
-//		if (rank() == 1) std::cerr << "send right" << std::endl << func_data << std::endl;
 		mpi_send_mpi_recv(func_data.tag, func_data.size_y(),
 		                  &func_data(func_data.size_x() - 2,0),
 		                  &func_data(func_data.size_x() - 1,0));
@@ -236,7 +225,6 @@ public:
 	virtual void wait(func_data_t &) {
 		MPI_Status status;
 		MPI_Wait(&response, &status);
-//		if (rank() == 1) std::cerr << "receive from right" << std::endl << func_data << std::endl;
 	}
 };
 
@@ -258,7 +246,6 @@ inline coor_t F(const coor_t x, const coor_t y) {
 
 inline coor_t phi(const coor_t x, const coor_t y) {
 	return exp(1 - (x + y) * (x + y));
-//	return 1 + sin(x*y);
 }
 
 inline coor_t solution(const coor_t x, const coor_t y) {
@@ -364,23 +351,23 @@ public:
 	inline bool is_min() {
 		return min_idx == 0;
 	}
-
-	inline size_t local_min() {
-		return static_cast<size_t>(is_min());
-	}
-
-	inline size_t local_max() {
-		return static_cast<size_t>(is_max());
-	}
-
-	size_t from_ext(const size_t ext_idx) {
-		if (not is_min())
-			return ext_idx + 1;
-	}
-
-//	bool is_external(const size_t local_idx) {
-//		return
+//
+//	inline size_t local_min() {
+//		return static_cast<size_t>(is_min());
 //	}
+//
+//	inline size_t local_max() {
+//		return static_cast<size_t>(is_max());
+//	}
+//
+//	size_t from_ext(const size_t ext_idx) {
+//		if (not is_min())
+//			return ext_idx + 1;
+//	}
+//
+////	bool is_external(const size_t local_idx) {
+////		return
+////	}
 };
 
 
@@ -419,22 +406,18 @@ private:
 	}
 
 	inline bool is_global_left() {
-//		return x.is_global_min(x.local(x.min_idx));
 		return x.is_min();
 	}
 
 	inline bool is_global_right() {
 		return x.is_max();
-//		return x.is_global_max(x.local(x.max_idx));
 	}
 
 	inline bool is_global_up() {
 		return y.is_min();
-//		return y.is_global_min(y.local(y.min_idx));
 	}
 
 	inline bool is_global_down() {
-//		return y.is_global_max(y.local(y.max_idx));
 		return y.is_max();
 	}
 
@@ -446,14 +429,6 @@ private:
 		// local border of extend area
 		return x.is_local_border(i) or y.is_local_border(j);
 	}
-
-//	inline bool is_external(const size_t i, const size_t j) {
-//		return is
-//	}
-
-//	inline size_t to_local_idx(const size_t i, const size_t j) {
-//
-//	}
 
 	void send_recv(func_data_t & func_data) {
 		up_neighbor->send_recv(func_data);
@@ -468,8 +443,6 @@ private:
 		left_neighbor->wait(func_data);
 		right_neighbor->wait(func_data);
 	}
-
-
 
 public:
 	OneDimensionData x;
@@ -486,8 +459,6 @@ public:
 	ISendReceive * left_neighbor;
 	ISendReceive * right_neighbor;
 	func_data_t computed_solution;
-//	func_data_t phi;
-//	func_data_t F;
 
 	LocalProcess(const OneDimensionData & x_data, const OneDimensionData & y_data, const coor_t eps, const int rank):
 			x(x_data), y(y_data), eps(eps), rank(rank),
@@ -503,24 +474,6 @@ public:
 				computed_solution(i,j) = phi(x[i], y[j]);
 			}
 		}
-//		if (not is_global_up())
-//			++y_size;
-//		if (not is_global_down())
-//			++y_size;
-//		if (not is_global_left())
-//			++x_size;
-//		if (not is_global_right())
-//			++x_size;
-//		std::cout << rank
-//		          << ' ' << is_global_up() << ' ' << is_global_down()
-//		          << ' ' << is_global_left() << ' ' << is_global_right()
-//		          << std::endl;
-//		std::cout << rank << ' ' << x_size << ' ' << y_size
-//		          << ' ' << x.min_idx << ":" << x.max_idx
-//		          << ' ' << x.min_idx << ":" << x.max_idx
-//		          << std::endl;
-//
-//		throw 2;
 
 		if (is_global_up()) {
 			up_neighbor = new SendReceiveEmpty();
@@ -543,31 +496,20 @@ public:
 			right_neighbor = new SendReceiveRight(rank + 1);
 		}
 
-//		std::cout << rank
-//		          << " up=" << up_neighbor->rank() << " down=" << down_neighbor->rank()
-//		          << " left=" << left_neighbor->rank() << " right=" << right_neighbor->rank()
-//		          << std::endl;
-
 		cur.resize(x_size, y_size);
 		next.resize(x_size, y_size);
 
-		if (rank == 0) std::cout << "init local and neighbor 'p'" << std::endl;
+//		if (rank == 0) std::cout << "init local and neighbor 'p'" << std::endl;
 		for (size_t i = 0; i < x_size; ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
 				next.p(i,j) = is_global_border(i,j) ? phi(x[i],y[j]) : 0;
-//				cur.p(i,ext_j) = is_global_border(i,ext_j) ? phi(x[i],y[ext_j]) : phi(x[i],y[ext_j]);
-//				cur.p(i,ext_j) = is_global_border(i,ext_j) ? phi(i,ext_j) : 0;
 			}
 		}
-//		std::cout << x_size << " " << y_size << std::endl;
-//		std::cout << next.p;
-//		std::cout << "next.p(0,0) = " << next.p(0,0) << std::endl;
 
 		// init 'r' and 'g'
-		if (rank == 0) std::cout << "init local 'r' and 'g'" << std::endl;
+//		if (rank == 0) std::cout << "init local 'r' and 'g'" << std::endl;
 		for (size_t i = 0; i < x_size; ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
-//				if(rank == 0) std::cout << i << ' ' << j << ' ' << is_local_border(i, j) << std::endl;
 				if (is_global_border(i,j)) {
 					next.r(i,j) = 0;
 				} else if (is_local_border(i,j)) {
@@ -575,32 +517,18 @@ public:
 					// it will be inited after
 					continue;
 				} else {
-//					next.r(i,j) = delta_h(next.p, i, j) - F(x[i], y[j]);
 					next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
 				}
 				next.g(i,j) = next.r(i,j);
 			}
 		}
 
-//		if (rank == 1) std::cerr << rank << ") " << next.r << std::endl;
-
-		if (rank == 0) std::cout << "sync neighbor 'r' and 'g'" << std::endl;
-
-//		if (rank == 0) std::cerr << "send r" << std::endl;
+//		if (rank == 0) std::cout << "sync neighbor 'r' and 'g'" << std::endl;
 		send_recv(next.r);
 		wait(next.r);
-//		if (rank == 0) std::cerr << "send g" << std::endl;
 		send_recv(next.g);
 		wait(next.g);
 
-//		if (rank == 0) std::cerr << rank << ") " << next.r << std::endl;
-
-//		std::cerr << delta_h(next.p, 3, 4) << std::endl;
-//		std::cerr << next.g;
-//		std::cerr << F(x[3], y[4]);
-//		throw 2;
-
-//		std::cout << "ok" << std::endl;
 		cur = next;
 	}
 
@@ -609,24 +537,19 @@ public:
 		// scalar is computed for internal points of global area
 		// process local computes scalar for local area points (not neighbor points)
 		coor_t numerator = 0.0, denominator = 0.0;
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				numerator += scalar_component(cur.r(i,j), cur.r(i,j), i, j);
 				denominator -= scalar_component(delta_h(cur.r,i,j) , cur.r(i,j), i, j);
 			}
 		}
-//		if (rank == 0) {
-//			std::cout << rank << " | " << numerator << " / " << denominator << std::endl;
-//		}
-//
 		coor_t send_data[2], receive_data[2];
 		send_data[0] = numerator;
 		send_data[1] = denominator;
 		MPI_Allreduce(send_data, receive_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 		numerator = receive_data[0];
 		denominator = receive_data[1];
-//		if (rank == 0) std::cerr << "result " << numerator << ' ' << denominator << std::endl;
-//		std::cerr << rank << ") " << cur.r << std::endl;
 		return numerator / denominator;
 	}
 
@@ -634,6 +557,7 @@ public:
 		// process local computes next 'p' for local area points (not neighbor points)
 		// global border points is not change
 		// neighbor points will be synced after
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.p(i,j) = cur.p(i,j) - tau * cur.r(i,j);
@@ -645,19 +569,18 @@ public:
 		// process local computes next 'r' for local area points (not neighbor points)
 		// global border points is not change
 		// neighbor points will be synced after
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
-//				next.r(i,j) = delta_h(next.p, i, j) - F(x[i], y[j]);
-//				next.r(i,j) = - delta_h(next.p, i, j) - F(i,j);
 			}
 		}
 	}
 
 	inline coor_t compute_alpha() {
 		// compute local numerator and denominator for tau
-//		double start = MPI_Wtime();
 		coor_t numerator = 0.0, denominator = 0.0;
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				numerator -= scalar_component(delta_h(next.r, i, j), cur.g(i, j), i, j);
@@ -674,6 +597,7 @@ public:
 	}
 
 	void calculate_new_g(const coor_t alpha) {
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 0; i < x_size; ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
 				next.g(i,j) = next.r(i,j) - alpha * cur.g(i,j);
@@ -684,6 +608,7 @@ public:
 	std::pair<coor_t,coor_t> compute_difference_and_error() {
 		// compute local difference and error for tau
 		coor_t difference = 0.0, error = 0.0;
+#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				coor_t buf = next.p(i,j) - cur.p(i,j);
@@ -702,11 +627,7 @@ public:
 	}
 
 	std::pair<coor_t,coor_t> calculate_iteration() {
-//		double start, end;
-
-//		start = MPI_Wtime();
 		coor_t tau = compute_tau();
-//		end = MPI_Wtime();
 //		if(rank == 0) std::cout << "computed tau (" << end - start << ")" << std::endl;
 //		start = MPI_Wtime();
 		calculate_new_p(tau);
@@ -741,13 +662,6 @@ public:
 
 //		start = MPI_Wtime();
 		std::pair<coor_t , coor_t > result = compute_difference_and_error();
-
-//		if (rank == 0) {
-//			std::cout << "tau = " << tau << std::endl;
-//			std::cout << "alpha = " << alpha << std::endl;
-//		}
-//		throw 2;
-
 //		end = MPI_Wtime();
 //		std::cout << "computed difference and error (" << end - start << ")" << std::endl;
 		return result;
@@ -759,55 +673,21 @@ public:
 		int iteration = 0;
 		coor_t difference = eps;
 		coor_t error;
+		double algo_start = MPI_Wtime();
 		for (; difference >= eps and iteration < MAX_ITERATION; ++iteration) {
 			double start = MPI_Wtime();
 			std::pair<coor_t, coor_t> result = calculate_iteration();
 			double end = MPI_Wtime();
 			difference = result.first;
 			error = result.second;
-			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " " << error
+			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
 			                         << "(" << end - start << ")" << std::endl;
-			if (rank == 2) {
-//				if (iteration == 0) std::cerr << next.p;
-//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
-//				if (iteration == 0) std::cerr << next.r;
-//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
-//				if (iteration == 0) std::cerr << next.g;
-//				if (iteration == 0) std::cerr << "---------------------" << std::endl;
-//				std::cerr << next.p;
-//				iteration = MAX_ITERATION;
-//				std::ofstream f("1_iter_c++.txt");
-//				std::cout << "next p" << std::endl;
-//				std::cout << next.p;
-//				std::cout << "cur p" << std::endl;
-//				std::cout << cur.p;
-//				std::cout << "phi" << std::endl;
-//				std::cout << computed_solution;
-//				std::cout << "next p" << std::endl;
-//				f << next.p;
-//				std::cout << "cur p" << std::endl;
-//				f << cur.p;
-//				std::cout << "phi" << std::endl;
-//				f << computed_solution;
-//				f.close();
-			}
-//			iteration = MAX_ITERATION;
-
-//			std::cout << "-----------------------------" << std::endl;
 			cur = next;
-//			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
-//			std::cout << "cur  p = " << cur.p << std::endl;
-//			std::cout << "next p = " << next.p << std::endl;
-//			std::cout << "phi    = ";
-//			for (int i = 0; i < x.N; ++i) {
-//				for (int j = 0; j < y.N; ++j) {
-//					std::cout << phi(x[i], y[j]) << ' ';
-//				}
-//			}
-//			std::cout << std::endl;
-//			std::cout << "r " << next.r << std::endl;
-//			std::cout << "g " << next.g << std::endl;
 		}
+		double algo_end = MPI_Wtime();
+		std::cout << "solution" << std::endl;
+		std::cout << next.p;
+		std::cout << "time " << algo_end - algo_start << std::endl;
 	}
 
 	~LocalProcess() {
@@ -880,27 +760,28 @@ compute_subfield_size_y(const int rank, const int processes_on_x, const int proc
 
 
 int main(int argc, char * argv[]) {
-	int process_count, rank;
+	if (argc != 3) {
+		std::cerr << "Usage: <program> <grid size> <concurrency enabled>" << std::endl;
+		std::cerr << "<grid size> must be 1000 or 2000" << std::endl;
+		std::cerr << "<concurrency enabled> must be 0 or 1" << std::endl;
+		return 1;
+	}
+	const int N = static_cast<int>(strtol(argv[1], NULL, 10));
+	concurrency_enabled = static_cast<bool>(strtol(argv[2], NULL, 10));
 
+	int process_count, rank;
 	int err_code;
 	err_code = MPI_Init(&argc, &argv);
 	if (err_code) {
 		return err_code;
 	}
 
-
-
-//	const int N = 6;
-//	const int N = 1000;
-	const int N = 2000;
-
-
 	// compute process on X and Y axes
 	MPI_Comm_size(MPI_COMM_WORLD, &process_count);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 //	process_count = 12;
 
-	if (rank == 0) std::cout << "process_count = " << process_count << std::endl;
+//	if (rank == 0) std::cout << "process_count = " << process_count << std::endl;
 
 	int a = static_cast<int>(sqrt(process_count));
 //	for (; process_count % a > 0; --a)
@@ -909,43 +790,27 @@ int main(int argc, char * argv[]) {
 //	 N == a * b
 //	 a - process number (X axes)
 //	 b - process number (Y axes)
-	// compute size on X axes
-//	std::cout << "a = " << a << std::endl;
-//	std::cout << "b = " << b << std::endl;
-//	std::cout << "hear" << std::endl;
-//	for (int i = 0; i < process_count; ++i) {
-//		rank = i;
-//	std::cout << "rank " << rank << std::endl;
+	// compute size on X axis
 	std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
+	// compute size on Y axis
 	std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
 //	std::pair<int, int> y_range = compute_subfield_size_y(rank, a, b, N);
 	x_range.first -= static_cast<int>(x_range.first > 0);
 	x_range.second += static_cast<int>(x_range.second < N - 1);
 	y_range.first -= static_cast<int>(y_range.first > 0);
 	y_range.second += static_cast<int>(y_range.second < N - 1);
-	std::cout << rank << ' '
-	          << "x_range = [" << x_range.first << ":" << x_range.second << "] "
-	          << "y_range = [" << y_range.first << ":" << y_range.second << "]"
-	          << std::endl;
-//	std::cout << rank << ' ' << y_range.second << std::endl;
-//	throw 2;
 
-//	const double q = 1.0;
 	const double q = 3.0 / 2;
 	// TODO: change q from 1 to (3.0 / 2)
 	OneDimensionData x_data = OneDimensionData(N, 0, 2, q, x_range.first, x_range.second, a);
 	OneDimensionData y_data = OneDimensionData(N, 0, 2, q, y_range.first, y_range.second, b);
 
-	if(rank == 0) std::cout << "init process" << std::endl;
+//	if(rank == 0) std::cout << "init process" << std::endl;
+
 	LocalProcess process(x_data, y_data, 0.0001, rank);
-	if (rank == 0) std::cout << "launch" << std::endl;
+//	if (rank == 0) std::cout << "launch" << std::endl;
 	process.launch();
-//
-	std::cout << rank << " x " << x_data.min_idx << '-' << x_data.max_idx
-	          << "=" << x_data.idx_count()
-	          << " y " << y_data.min_idx << ':' << y_data.max_idx
-	          << "=" << y_data.idx_count() << std::endl;
-//	}
+
 	MPI_Finalize();
 	return 0;
 }
