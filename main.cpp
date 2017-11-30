@@ -3,7 +3,7 @@
 #include <mpi.h>
 #include <vector>
 #include <utility>
-
+#include <fstream>
 
 
 typedef double coor_t;
@@ -11,7 +11,7 @@ typedef std::vector<coor_t> subarea_t;
 typedef coor_t * coor_line_t;
 typedef coor_t (*func_t) (const coor_t x, const coor_t y);
 
-enum func_tag_t {P_TAG, G_TAG, R_TAG, NULL_TAG};
+enum func_tag_t {P_TAG, G_TAG, R_TAG, PHI_TAG, NULL_TAG};
 
 enum action_t {
 	SEND_UP, SEND_DOWN, SEND_LEFT, SEND_RIGHT,
@@ -51,7 +51,7 @@ struct func_data_t {
 		return data[i][j];
 	}
 
-	coor_t & operator()(const size_t local_i, const size_t local_j) {
+	coor_t & operator()(const size_t local_i, const size_t  local_j) {
 		return data[local_i][local_j];
 	}
 
@@ -77,6 +77,7 @@ std::ostream & operator<<(std::ostream & out, func_data_t & func_data) {
 		for (size_t j = 0; j < func_data.size_y(); ++j) {
 			out << func_data(i,j) << ' ';
 		}
+		out << std::endl;
 	}
 	return out;
 }
@@ -460,7 +461,7 @@ public:
 	ISendReceive * down_neighbor;
 	ISendReceive * left_neighbor;
 	ISendReceive * right_neighbor;
-
+	func_data_t computed_solution;
 //	func_data_t phi;
 //	func_data_t F;
 
@@ -468,9 +469,16 @@ public:
 			x(x_data), y(y_data), eps(eps), rank(rank),
 			x_size(x.idx_count()), y_size(y.idx_count()),
 			up_neighbor(NULL), down_neighbor(NULL),
-			left_neighbor(NULL), right_neighbor(NULL)
+			left_neighbor(NULL), right_neighbor(NULL),
+			computed_solution(PHI_TAG)
 //			phi(NULL_TAG), F(NULL_TAG)
 	{
+		computed_solution.resize(x.N, y.N);
+		for (int i = 0; i < x.N; ++i) {
+			for (int j = 0; j < y.N; ++j) {
+				computed_solution(i,j) = phi(x[i], y[j]);
+			}
+		}
 //		if (not is_global_up())
 //			++y_size;
 //		if (not is_global_down())
@@ -632,7 +640,7 @@ public:
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				coor_t buf = next.p(i,j) - cur.p(i,j);
 				difference += scalar_component(buf, buf, i, j);
-				buf = next.p(i,j) - solution(x[i], y[j]);
+				buf = next.p(i,j) - ::solution(x[i], y[j]);
 				error += scalar_component(buf, buf, i, j);
 			}
 		}
@@ -691,16 +699,35 @@ public:
 	void launch() {
 		const int MAX_ITERATION = 10000;
 		int iteration = 0;
-		for (; iteration < MAX_ITERATION ;++iteration) {
+		coor_t difference = eps;
+		coor_t error;
+		for (; difference >= eps and iteration < MAX_ITERATION; ++iteration) {
 			double start = MPI_Wtime();
 			std::pair<coor_t, coor_t> result = calculate_iteration();
 			double end = MPI_Wtime();
-			coor_t difference = result.first;
-			coor_t error = result.second;
+			difference = result.first;
+			error = result.second;
 			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " " << error
 			                         << "(" << end - start << ")" << std::endl;
-			if (difference < eps)
-				break;
+			if (rank == 0) {
+				iteration = MAX_ITERATION;
+				std::ofstream f("1_iter_c++.txt");
+//				std::cout << "next p" << std::endl;
+//				std::cout << next.p;
+//				std::cout << "cur p" << std::endl;
+//				std::cout << cur.p;
+//				std::cout << "phi" << std::endl;
+//				std::cout << computed_solution;
+//				std::cout << "next p" << std::endl;
+				f << next.p;
+//				std::cout << "cur p" << std::endl;
+				f << cur.p;
+//				std::cout << "phi" << std::endl;
+				f << computed_solution;
+				f.close();
+			}
+			std::cout << "-----------------------------" << std::endl;
+			cur = next;
 //			std::cout << "p == new_p is " << (cur == next? "true" : "false") << std::endl;
 //			std::cout << "cur  p = " << cur.p << std::endl;
 //			std::cout << "next p = " << next.p << std::endl;
@@ -713,7 +740,6 @@ public:
 //			std::cout << std::endl;
 //			std::cout << "r " << next.r << std::endl;
 //			std::cout << "g " << next.g << std::endl;
-			cur = next;
 		}
 	}
 
@@ -768,7 +794,7 @@ int main(int argc, char * argv[]) {
 
 
 
-	const int N = 1000;
+	const int N = 7;
 
 
 	// compute process on X and Y axes
