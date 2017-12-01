@@ -537,7 +537,6 @@ public:
 		// scalar is computed for internal points of global area
 		// process local computes scalar for local area points (not neighbor points)
 		coor_t numerator = 0.0, denominator = 0.0;
-#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				numerator += scalar_component(cur.r(i,j), cur.r(i,j), i, j);
@@ -580,7 +579,6 @@ public:
 	inline coor_t compute_alpha() {
 		// compute local numerator and denominator for tau
 		coor_t numerator = 0.0, denominator = 0.0;
-#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				numerator -= scalar_component(delta_h(next.r, i, j), cur.g(i, j), i, j);
@@ -608,7 +606,6 @@ public:
 	std::pair<coor_t,coor_t> compute_difference_and_error() {
 		// compute local difference and error for tau
 		coor_t difference = 0.0, error = 0.0;
-#pragma omp parallel for if (concurrency_enabled)
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				coor_t buf = next.p(i,j) - cur.p(i,j);
