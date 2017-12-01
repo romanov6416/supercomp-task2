@@ -675,13 +675,13 @@ public:
 		coor_t error = -1;
 		double algo_start = MPI_Wtime();
 		for (; difference >= eps and iteration < MAX_ITERATION; ++iteration) {
-//			double start = MPI_Wtime();
+			double start = MPI_Wtime();
 			std::pair<coor_t, coor_t> result = calculate_iteration();
-//			double end = MPI_Wtime();
+			double end = MPI_Wtime();
 			difference = result.first;
 			error = result.second;
-//			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
-//			                         << "(" << end - start << ")" << std::endl;
+			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
+			                         << "(" << end - start << ")" << std::endl;
 			cur = next;
 		}
 		double algo_end = MPI_Wtime();
