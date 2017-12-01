@@ -672,22 +672,24 @@ public:
 		const int MAX_ITERATION = 10000;
 		int iteration = 0;
 		coor_t difference = eps;
-		coor_t error;
+		coor_t error = -1;
 		double algo_start = MPI_Wtime();
 		for (; difference >= eps and iteration < MAX_ITERATION; ++iteration) {
-			double start = MPI_Wtime();
+//			double start = MPI_Wtime();
 			std::pair<coor_t, coor_t> result = calculate_iteration();
-			double end = MPI_Wtime();
+//			double end = MPI_Wtime();
 			difference = result.first;
 			error = result.second;
-			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
-			                         << "(" << end - start << ")" << std::endl;
+//			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
+//			                         << "(" << end - start << ")" << std::endl;
 			cur = next;
 		}
 		double algo_end = MPI_Wtime();
 		std::cout << "solution" << std::endl;
 		std::cout << next.p;
 		std::cout << "time " << algo_end - algo_start << std::endl;
+		std::cout << "error " << error << std::endl;
+		std::cout << "difference " << difference << std::endl;
 	}
 
 	~LocalProcess() {
@@ -781,11 +783,10 @@ int main(int argc, char * argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 //	process_count = 12;
 
-//	if (rank == 0) std::cout << "process_count = " << process_count << std::endl;
 
 	int a = static_cast<int>(sqrt(process_count));
-//	for (; process_count % a > 0; --a)
-//		;
+	for (; process_count % a > 0; --a)
+		;
 	int b = process_count / a;
 //	 N == a * b
 //	 a - process number (X axes)
@@ -794,11 +795,26 @@ int main(int argc, char * argv[]) {
 	std::pair<int, int> x_range = compute_subfield_size(rank, a, N, true, a);
 	// compute size on Y axis
 	std::pair<int, int> y_range = compute_subfield_size(rank, b, N, false, a);
+
+//	std::cout << "a=" << a << " b=" << b << std::endl;
+	const double k = static_cast<double>(a) / b;
+	if (k < 0.5 or 2.0 < k) {
+		std::cerr << "fail to distribute processes (a/b=" << k << ")" << std::endl;
+		return 1;
+	}
 //	std::pair<int, int> y_range = compute_subfield_size_y(rank, a, b, N);
+
+//	std::cout << rank << ") "
+//	          << "[" << x_range.first << ":" << x_range.second << "] X "
+//	          << "[" << y_range.first << ":" << y_range.second << "]"
+//	          << std::endl;
+
 	x_range.first -= static_cast<int>(x_range.first > 0);
 	x_range.second += static_cast<int>(x_range.second < N - 1);
 	y_range.first -= static_cast<int>(y_range.first > 0);
 	y_range.second += static_cast<int>(y_range.second < N - 1);
+
+
 
 	const double q = 3.0 / 2;
 	// TODO: change q from 1 to (3.0 / 2)
