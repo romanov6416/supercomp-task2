@@ -5,6 +5,10 @@
 #include <utility>
 #include <fstream>
 #include <cstdlib>
+#include <string>
+#include <stdlib.h>
+#include <cstdlib>
+#include <sstream>
 
 
 typedef double coor_t;
@@ -26,6 +30,7 @@ inline int get_tag(action_t act, func_tag_t v) {
 	return act + (v << 2);
 }
 
+typedef std::pair<std::pair<int,int>, coor_t> func_value_t;
 
 
 
@@ -49,8 +54,8 @@ struct func_data_t {
 		return data[0].size();
 	}
 
-	inline const coor_t & operator()(const size_t i, const size_t j) const {
-		return data[i][j];
+	inline const coor_t & operator()(const size_t local_i, const size_t local_j) const {
+		return data[local_i][local_j];
 	}
 
 	coor_t & operator()(const size_t local_i, const size_t  local_j) {
@@ -280,6 +285,10 @@ public:
 
 	inline coor_t coor(const size_t local_idx) {
 		return line[global(local_idx)];
+	}
+
+	inline coor_t global_coor(const size_t global_idx) {
+		return line[global_idx];
 	}
 
 	inline coor_t _coor(const size_t global_idx) {
@@ -539,8 +548,8 @@ public:
 		coor_t numerator = 0.0, denominator = 0.0;
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
-				numerator += scalar_component(cur.r(i,j), cur.r(i,j), i, j);
-				denominator -= scalar_component(delta_h(cur.r,i,j) , cur.r(i,j), i, j);
+				numerator += scalar_component(cur.r(i,j), cur.g(i,j), i, j);
+				denominator += scalar_component(- delta_h(cur.g,i,j) , cur.g(i,j), i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -557,9 +566,9 @@ public:
 		// global border points is not change
 		// neighbor points will be synced after
 #pragma omp parallel for if (concurrency_enabled)
-		for (size_t i = 1; i < x_size - 1; ++i) {
+		for (int i = 1; i < static_cast<int>(x_size) - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
-				next.p(i,j) = cur.p(i,j) - tau * cur.r(i,j);
+				next.p(i,j) = cur.p(i,j) - tau * cur.g(i,j);
 			}
 		}
 	}
@@ -569,7 +578,7 @@ public:
 		// global border points is not change
 		// neighbor points will be synced after
 #pragma omp parallel for if (concurrency_enabled)
-		for (size_t i = 1; i < x_size - 1; ++i) {
+		for (int i = 1; i < static_cast<int>(x_size) - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
 				next.r(i,j) = - delta_h(next.p, i, j) - F(x[i], y[j]);
 			}
@@ -581,8 +590,8 @@ public:
 		coor_t numerator = 0.0, denominator = 0.0;
 		for (size_t i = 1; i < x_size - 1; ++i) {
 			for (size_t j = 1; j < y_size - 1; ++j) {
-				numerator -= scalar_component(delta_h(next.r, i, j), cur.g(i, j), i, j);
-				denominator -= scalar_component(delta_h(cur.g, i, j), cur.g(i, j), i, j);
+				numerator += scalar_component( - delta_h(next.r, i, j), cur.g(i, j), i, j);
+				denominator += scalar_component( - delta_h(cur.g, i, j), cur.g(i, j), i, j);
 			}
 		}
 		coor_t send_data[2], receive_data[2];
@@ -596,7 +605,7 @@ public:
 
 	void calculate_new_g(const coor_t alpha) {
 #pragma omp parallel for if (concurrency_enabled)
-		for (size_t i = 0; i < x_size; ++i) {
+		for (int i = 0; i < static_cast<int>(x_size); ++i) {
 			for (size_t j = 0; j < y_size; ++j) {
 				next.g(i,j) = next.r(i,j) - alpha * cur.g(i,j);
 			}
@@ -665,7 +674,7 @@ public:
 	}
 
 
-	void launch() {
+	void launch(bool print_debug, bool print_info) {
 		const int MAX_ITERATION = 10000;
 		int iteration = 0;
 		coor_t difference = eps;
@@ -677,17 +686,150 @@ public:
 			double end = MPI_Wtime();
 			difference = result.first;
 			error = result.second;
-			if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
-			                         << "(" << end - start << ")" << std::endl;
+			if (print_debug)
+				if (rank == 0) std::cout << "[" << iteration << "] " << difference << " ~" << error
+				                         << "(" << end - start << ")" << std::endl;
+
+//			if (rank == 0) std::cerr << iteration << " iter" << std::endl;
+//			print_solution();
+
 			cur = next;
+//			iteration = MAX_ITERATION;
 		}
+//		print_solution();
 		double algo_end = MPI_Wtime();
-		std::cout << "solution" << std::endl;
-		std::cout << next.p;
-		std::cout << "time " << algo_end - algo_start << std::endl;
-		std::cout << "error " << error << std::endl;
-		std::cout << "difference " << difference << std::endl;
+
+
+
+//		delete[] send_p;
+//		delete[] receive_p;
+		if (print_info)
+			if (rank == 0) {
+				std::cout << "time " << algo_end - algo_start << std::endl;
+				std::cout << "error " << error << std::endl;
+				std::cout << "difference " << difference << std::endl;
+			}
 	}
+
+	void print_solution() {
+		// send next p to rank 0
+//		std::pair<std::pair<int,int>, coor_t> send_p[(x_size - 2) * (y_size - 2)];
+
+		int rank_size;
+		MPI_Comm_size(MPI_COMM_WORLD, &rank_size);
+
+		int send_data_size = static_cast<int>(x.N / sqrt(rank_size) + 1) * static_cast<int>(y.N / sqrt(rank_size) + 1);
+		std::vector<coor_t > send_p(send_data_size, -1);
+		std::vector<int> send_i(send_data_size, -1);
+		std::vector<int> send_j(send_data_size, -1);
+		int k = 0;
+		for (size_t i = 1; i < x_size - 1; ++ i) {
+			for (size_t j = 1; j < y_size - 1; ++j) {
+//				if (rank == 4) std::cout << i << ' ' << j << ' ' << x.global(i) << ' ' << y.global(j) << std::endl;
+//				std::cout << rank << ' ' << i << ' ' << j << ' ' << x.global(i) << ' ' << y.global(j) << std::endl;
+				send_p[k] = next.p(i,j);
+				send_i[k] = static_cast<int>(x.global(i));
+				send_j[k] = static_cast<int>(y.global(j));
+//				send_p[k] = std::make_pair(
+//						std::make_pair(x.global(i),y.global(j)),
+////						next.p(i,j)
+//						rank
+//				);
+				++k;
+			}
+		}
+//		std::cout << send_i.size() << ' ' << send_j.size() << std::endl;
+//		std::cout << std::endl;
+
+
+		int receive_data_size = 0;
+		if (rank == 0) {
+			receive_data_size = send_data_size * rank_size;
+		}
+//		int receive_data_size = (x.N - 2) * (y.N - 2);
+//		std::cout << rank << ' ' << send_data_size << ' ' << receive_data_size << std::endl;
+//		func_value_t receive_p[receive_data_size];
+//		if (rank == 0) std::cout << "allocate data p" << std::endl;
+		std::vector<coor_t> receive_p(receive_data_size, -1);
+//		if (rank == 0) std::cout << "allocate data i" << std::endl;
+		std::vector<int> receive_i(receive_data_size, -1);
+//		if (rank == 0) std::cout << "allocate data j" << std::endl;
+		std::vector<int> receive_j(receive_data_size, -1);
+
+//		for (k = 0; k < receive_data_size; ++k) {
+//			receive_p[k] = -1;
+//			receive_i[k] = -1;
+//			receive_j[k] = -1;
+//		}
+
+//		if (rank == 0) std::cout << "gather0" << std::endl;
+		MPI_Gather(&send_p[0], send_data_size, MPI_DOUBLE,
+		           &receive_p[0], receive_data_size / rank_size, MPI_DOUBLE,
+		           0, MPI_COMM_WORLD);
+//		if (rank == 0) std::cout << "gather1" << std::endl;
+		MPI_Gather(&send_i[0], send_data_size, MPI_INT,
+		           &receive_i[0], receive_data_size / rank_size, MPI_INT,
+		           0, MPI_COMM_WORLD);
+//		if (rank == 0) std::cout << "gather2" << std::endl;
+		MPI_Gather(&send_j[0], send_data_size, MPI_INT,
+		           &receive_j[0], receive_data_size / rank_size, MPI_INT,
+		           0, MPI_COMM_WORLD);
+//		if (rank == 0) std::cout << "gather3" << std::endl;
+
+
+
+		if (rank == 0) {
+			for (k = 0; k < receive_data_size; ++k) {
+				int i = receive_i[k];
+				int j = receive_j[k];
+				if (i == -1 and j == -1)
+					continue;
+				coor_t value = receive_p[k];
+				std::cout
+				          << ' ' << i << ' ' << j
+				          << ' ' << x.global_coor(i)
+				          << ' ' << y.global_coor(j)
+				          << ' ' << value
+				          << ' ' << phi(x.global_coor(i), y.global_coor(j))
+				          << std::endl;
+//				std::cout << k << ' ' << i << ' ' << j << ' ' << value << std::endl;
+			}
+			for (int i = 0; i < x.N; ++i) {
+				int j = 0;
+				coor_t xi = x.global_coor(i), yj = y.global_coor(j);
+				std::cout
+						<< ' ' << i << ' ' << j
+						<< ' ' << xi << ' ' << yj
+						<< ' ' << phi(xi, yj) << ' ' << phi(xi, yj)
+						<< std::endl;
+				j = y.N - 1;
+				yj = y.global_coor(j);
+				std::cout
+						<< ' ' << i << ' ' << j
+						<< ' ' << xi << ' ' << yj
+						<< ' ' << phi(xi, yj) << ' ' << phi(xi, yj)
+						<< std::endl;
+			}
+			for (int j = 1; j < y.N - 1; ++j) {
+				int i = 0;
+				coor_t xi = x.global_coor(i), yj = y.global_coor(j);
+				std::cout
+						<< ' ' << i << ' ' << j
+						<< ' ' << xi << ' ' << yj
+						<< ' ' << phi(xi, yj) << ' ' << phi(xi, yj)
+						<< std::endl;
+				i = x.N - 1;
+				xi = x.global_coor(i);
+				std::cout
+						<< ' ' << i << ' ' << j
+						<< ' ' << xi << ' ' << yj
+						<< ' ' << phi(xi, yj) << ' ' << phi(xi, yj)
+						<< std::endl;
+			}
+		}
+//		if (rank == 0) std::cout << "end of output" << std::endl;
+	}
+
 
 	~LocalProcess() {
 		delete up_neighbor;
@@ -759,14 +901,22 @@ compute_subfield_size_y(const int rank, const int processes_on_x, const int proc
 
 
 int main(int argc, char * argv[]) {
-	if (argc != 3) {
-		std::cerr << "Usage: <program> <grid size> <concurrency enabled>" << std::endl;
-		std::cerr << "<grid size> must be 1000 or 2000" << std::endl;
-		std::cerr << "<concurrency enabled> must be 0 or 1" << std::endl;
+	if (argc != 1 + 5) {
+		std::cerr << "Usage: <program> <grid size> <concurrency enabled>"
+		          << " <print solution> <print_info> <print debug>"
+		          << std::endl;
+		std::cerr << "<grid size> must be 1000 or 2000" << std::endl;  // 1
+		std::cerr << "<concurrency enabled> must be 0 or 1" << std::endl;  // 2
+		std::cerr << "<print solution> must be 0 or 1" << std::endl;  // 3
+		std::cerr << "<print info> must be 0 or 1" << std::endl;  // 4
+		std::cerr << "<print debug> must be 0 or 1" << std::endl; // 5
 		return 1;
 	}
 	const int N = static_cast<int>(strtol(argv[1], NULL, 10));
 	concurrency_enabled = static_cast<bool>(strtol(argv[2], NULL, 10));
+	bool print_solution = static_cast<bool>(strtol(argv[3], NULL, 10));
+	bool print_info = static_cast<bool>(strtol(argv[4], NULL, 10));
+	bool print_debug = static_cast<bool>(strtol(argv[5], NULL, 10));
 
 	int process_count, rank;
 	int err_code;
@@ -822,7 +972,9 @@ int main(int argc, char * argv[]) {
 
 	LocalProcess process(x_data, y_data, 0.0001, rank);
 //	if (rank == 0) std::cout << "launch" << std::endl;
-	process.launch();
+	process.launch(print_debug, print_info);
+	if (print_solution)
+		process.print_solution();
 
 	MPI_Finalize();
 	return 0;

@@ -6,7 +6,7 @@ import math
 Ax, Bx = 0.0, 2.0
 Ay, By = 0.0, 2.0
 
-N = 6
+N = 100
 cols, rows = N, N
 # X and Y steps.
 x_step = (Bx - Ax) / cols
@@ -15,6 +15,7 @@ y_step = (By - Ay) / rows
 
 P = [0] * (cols * rows)
 S = P.copy()
+G = P.copy()
 R = P.copy()
 
 
@@ -72,7 +73,7 @@ def laplas_5_matrix(m):
             a12 = cell(m, i, j + 1)
             tmp1 = 1.0/(x_step * x_step) * (2*a11 - a01 - a21)
             tmp2 = 1.0/(y_step * y_step) * (2*a11 - a10 - a12)
-            set_cell(ret, i, j, -(tmp1 + tmp2))
+            set_cell(ret, i, j, (tmp1 + tmp2))
     return ret
 
 
@@ -94,10 +95,14 @@ def calculate_next_r():
 def print_matrix(m):
     # for i in range(rows - 1, -1, -1):
     for i in range(rows):
-        buf = []
-        for j in range(cols):
-            buf.append(cell(m, i, j))
-        print("%.7s " * len(buf) % tuple(buf))
+        print_raw(m, i)
+
+
+def print_raw(m, i):
+    buf = []
+    for j in range(cols):
+        buf.append(cell(m, i, j))
+    print("%.7s " * len(buf) % tuple(buf))
 
 
 # Calculate P_i+1 using formula P_i+1 = P_i - tau * r_or_g_i.
@@ -116,34 +121,8 @@ def calculate_next_g(G, alpha):
             set_cell(G, i, j, cell(R, i, j) - alpha * old)
 
 
-def main():
-    # Init P and R.
-    for i in range(0, cols):
-        set_cell(P, 0, i, phi(X(i), Y(0)))
-        set_cell(P, rows - 1, i, phi(X(i), Y(rows - 1)))
-
-    for i in range(0, rows):
-        set_cell(P, i, 0, phi(X(0), Y(i)))
-        set_cell(P, i, cols - 1, phi(X(cols - 1), Y(i)))
-
-    for i in range(rows):
-        for j in range(cols):
-            set_cell(S, i, j, phi(X(i), Y(j)))
-
-
-    # Make step 0.
-    calculate_next_r()
-
-    # print(cell(laplas_5_matrix(P), 3, 4))
-    # print_matrix(R)
-    # print_matrix(S)
-    # print(phi(X(4), Y(3)))
-    # print(cell(P, 0,0))
-    # exit()
-
-
+def make_iter():
     # Make step 1.
-    G = R.copy()
     tmp1 = scalar(R, R)
     matrix_buffer = laplas_5_matrix(R)
     tmp2 = scalar(matrix_buffer, R)
@@ -162,11 +141,47 @@ def main():
     # print("alpha = %s" % alpha)
     calculate_next_g(G, alpha)
 
-    print_matrix(P)
-    print("---------------------")
-    print_matrix(R)
-    print("---------------------")
-    print_matrix(G)
+
+def main():
+    # Init P and R.
+    for i in range(0, cols):
+        set_cell(P, 0, i, phi(X(i), Y(0)))
+        set_cell(P, rows - 1, i, phi(X(i), Y(rows - 1)))
+
+    for i in range(0, rows):
+        set_cell(P, i, 0, phi(X(0), Y(i)))
+        set_cell(P, i, cols - 1, phi(X(cols - 1), Y(i)))
+
+    for i in range(rows):
+        for j in range(cols):
+            set_cell(S, i, j, phi(X(i), Y(j)))
+
+    # Make step 0.
+    calculate_next_r()
+    global G
+    G = R.copy()
+
+
+    # print(cell(laplas_5_matrix(P), 3, 4))
+    # print_matrix(R)
+    # print_matrix(S)
+    # print(phi(X(4), Y(3)))
+    # print(cell(P, 0,0))
+    # exit()
+
+    make_iter()
+
+    # print("tau = %s" % tau)
+    # print("alpha = %s" % alpha)
+
+
+    print_raw(P, 50)
+    print("-" * 80)
+    print_raw(S, 50)
+    # print("---------------------")
+    # print_matrix(R)
+    # print("---------------------")
+    # print_matrix(G)
 
     # # P2 = []
     # with open("/home/andrey/Programming/super_com/task2/cmake-build-debug/1_iter_c++.txt") as f:
